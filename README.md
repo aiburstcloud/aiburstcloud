@@ -1,0 +1,129 @@
+# AI Burst Cloud
+
+**Dual-mode cloud burst LLM router.** Route inference between local GPUs and cloud serverless backends with automatic failover, data sovereignty controls, and cost management.
+
+[aiburstcloud.com](https://aiburstcloud.com)
+
+## Two burst modes
+
+### Edge-first burst (`edge_burst`)
+
+Local GPU handles baseline traffic. Cloud bursts only when local is overloaded or down.
+
+```
+User → [AI Burst Cloud] → Local GPU (primary, free)
+                        ↘ Cloud GPU (burst when queue > 5)
+```
+
+**Best for:** Cost optimization. Data stays local by default. Cloud is the safety valve.
+
+### Cloud-first burst (`cloud_burst`)
+
+Cloud handles everything for maximum speed and scale. Sensitive requests automatically "burst down" to local/on-prem GPU.
+
+```
+User → [AI Burst Cloud] → Cloud GPU (primary, fast)
+                        ↘ Local GPU (sensitive data only)
+```
+
+**Best for:** Performance-first teams that need sovereignty-on-demand for regulated data.
+
+## Three-axis routing engine
+
+| Axis | Logic | Applies to |
+|------|-------|------------|
+| **Data sovereignty** | Sensitive keywords detected → always local | Both modes |
+| **Cost minimization** | Daily cloud budget cap → local when exhausted | Both modes |
+| **Latency optimization** | Primary overloaded → burst to secondary | Both modes |
+
+## Quick start
+
+```bash
+# Clone
+git clone https://github.com/YOUR_USER/aiburstcloud.git
+cd aiburstcloud
+
+# Configure
+cp .env.example .env
+# Edit .env with your cloud endpoint and API key
+
+# Launch (edge-first mode)
+docker compose up -d
+
+# Test
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "burst-auto",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Check routing status
+curl http://localhost:8000/health
+```
+
+## Switch modes
+
+Set `BURST_MODE` in your `.env` or environment:
+
+```bash
+# Edge-first (default)
+BURST_MODE=edge_burst docker compose up -d
+
+# Cloud-first
+BURST_MODE=cloud_burst docker compose up -d
+```
+
+Or override per-request with a header:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "X-Burst-Mode: cloud_burst" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "burst-auto", "messages": [{"role": "user", "content": "Hello!"}]}'
+```
+
+## Response headers
+
+Every response includes routing metadata:
+
+| Header | Example | Description |
+|--------|---------|-------------|
+| `X-Burst-Backend` | `local` | Which backend handled the request |
+| `X-Burst-Mode` | `edge_burst` | Active burst mode |
+| `X-Burst-Reason` | `local_overloaded_burst_to_cloud` | Why that backend was chosen |
+| `X-Burst-Sensitivity` | `public` | Detected sensitivity level |
+
+## Observability
+
+- `GET /health` — backend status, queue depths, cost tracking
+- `GET /metrics` — Prometheus-compatible plaintext metrics
+- `GET /v1/models` — OpenAI-compatible model listing
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BURST_MODE` | `edge_burst` | `edge_burst` or `cloud_burst` |
+| `LOCAL_URL` | `http://localhost:11434` | Ollama / local vLLM endpoint |
+| `LOCAL_MODEL` | `qwen3.5-35b-a3b` | Model name for local backend |
+| `LOCAL_MAX_QUEUE` | `5` | Max concurrent local requests before burst |
+| `LOCAL_LATENCY_THRESHOLD_MS` | `2000` | Avg latency trigger for burst |
+| `CLOUD_URL` | — | vLLM endpoint (RunPod / Modal / any) |
+| `CLOUD_MODEL` | `Qwen/Qwen3.5-35B-A3B-AWQ` | Model name for cloud backend |
+| `CLOUD_API_KEY` | — | Bearer token for cloud endpoint |
+| `CLOUD_MAX_QUEUE` | `50` | Max concurrent cloud requests (cloud_burst mode) |
+| `CLOUD_LATENCY_THRESHOLD_MS` | `5000` | Avg latency trigger (cloud_burst mode) |
+| `DAILY_CLOUD_BUDGET_USD` | `5.00` | Max daily cloud spend before cutoff |
+| `CLOUD_COST_PER_1K_TOKENS` | `0.002` | Estimated cost per 1K tokens |
+| `SENSITIVE_KEYWORDS` | *(see code)* | Comma-separated keywords forcing local routing |
+
+## Compatible backends
+
+**Local:** Ollama, vLLM, llama.cpp (OpenAI-compatible mode), LM Studio, LocalAI
+
+**Cloud:** RunPod Serverless, Modal, Google Cloud Run GPU, any OpenAI-compatible vLLM endpoint
+
+## License
+
+MIT — see [LICENSE](LICENSE)

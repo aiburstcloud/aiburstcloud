@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  # ---------------------------------------------------------------
+  # AI Burst Cloud Router
+  # ---------------------------------------------------------------
+  aiburstcloud:
+    build: .
+    container_name: aiburstcloud
+    ports:
+      - "8000:8000"
+    environment:
+      # Burst mode: "edge_burst" or "cloud_burst"
+      - BURST_MODE=${BURST_MODE:-edge_burst}
+
+      # Local backend
+      - LOCAL_URL=${LOCAL_URL:-http://host.docker.internal:11434}
+      - LOCAL_MODEL=${LOCAL_MODEL:-qwen3.5-35b-a3b}
+      - LOCAL_MAX_QUEUE=5
+      - LOCAL_LATENCY_THRESHOLD_MS=2000
+
+      # Cloud backend
+      - CLOUD_URL=${CLOUD_URL:-}
+      - CLOUD_MODEL=${CLOUD_MODEL:-Qwen/Qwen3.5-35B-A3B-AWQ}
+      - CLOUD_API_KEY=${CLOUD_API_KEY:-}
+      - CLOUD_MAX_QUEUE=50
+      - CLOUD_LATENCY_THRESHOLD_MS=5000
+
+      # Cost controls
+      - DAILY_CLOUD_BUDGET_USD=${DAILY_CLOUD_BUDGET_USD:-5.00}
+      - CLOUD_COST_PER_1K_TOKENS=${CLOUD_COST_PER_1K_TOKENS:-0.002}
+
+      # Custom sensitivity keywords (comma-separated, optional)
+      # - SENSITIVE_KEYWORDS=ais,mmsi,pii,hipaa,secret
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - aiburstcloud
+
+networks:
+  aiburstcloud:
+    driver: bridge
