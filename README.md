@@ -4,6 +4,26 @@
 
 [aiburstcloud.com](https://aiburstcloud.com)
 
+## Install
+
+**One line:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aiburstcloud/aiburstcloud/main/install.sh | bash
+```
+
+**Or pip:**
+
+```bash
+pip install git+https://github.com/aiburstcloud/aiburstcloud.git
+```
+
+**Then run:**
+
+```bash
+aiburstcloud
+```
+
 ## Two burst modes
 
 ### Edge-first burst (`edge_burst`)
@@ -11,8 +31,8 @@
 Local GPU handles baseline traffic. Cloud bursts only when local is overloaded or down.
 
 ```
-User → [AI Burst Cloud] → Local GPU (primary, free)
-                        ↘ Cloud GPU (burst when queue > 5)
+User -> [AI Burst Cloud] -> Local GPU (primary, free)
+                         \-> Cloud GPU (burst when queue > 5)
 ```
 
 **Best for:** Cost optimization. Data stays local by default. Cloud is the safety valve.
@@ -22,8 +42,8 @@ User → [AI Burst Cloud] → Local GPU (primary, free)
 Cloud handles everything for maximum speed and scale. Sensitive requests automatically "burst down" to local/on-prem GPU.
 
 ```
-User → [AI Burst Cloud] → Cloud GPU (primary, fast)
-                        ↘ Local GPU (sensitive data only)
+User -> [AI Burst Cloud] -> Cloud GPU (primary, fast)
+                         \-> Local GPU (sensitive data only)
 ```
 
 **Best for:** Performance-first teams that need sovereignty-on-demand for regulated data.
@@ -32,46 +52,67 @@ User → [AI Burst Cloud] → Cloud GPU (primary, fast)
 
 | Axis | Logic | Applies to |
 |------|-------|------------|
-| **Data sovereignty** | Sensitive keywords detected → always local | Both modes |
-| **Cost minimization** | Daily cloud budget cap → local when exhausted | Both modes |
-| **Latency optimization** | Primary overloaded → burst to secondary | Both modes |
+| **Data sovereignty** | Sensitive keywords detected -> always local | Both modes |
+| **Cost minimization** | Daily cloud budget cap -> local when exhausted | Both modes |
+| **Latency optimization** | Primary overloaded -> burst to secondary | Both modes |
 
 ## Quick start
 
-```bash
-# Clone
-git clone https://github.com/YOUR_USER/aiburstcloud.git
-cd aiburstcloud
+### With pip
 
-# Configure
+```bash
+# Install
+pip install git+https://github.com/aiburstcloud/aiburstcloud.git
+
+# Set your cloud endpoint (optional — works local-only out of the box)
+export CLOUD_URL=https://api.runpod.ai/v2/your-endpoint-id/openai
+export CLOUD_API_KEY=your_api_key_here
+
+# Start
+aiburstcloud
+```
+
+### With Docker
+
+```bash
+git clone https://github.com/aiburstcloud/aiburstcloud.git
+cd aiburstcloud
 cp .env.example .env
 # Edit .env with your cloud endpoint and API key
-
-# Launch (edge-first mode)
 docker compose up -d
+```
 
-# Test
+### Test it
+
+```bash
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "burst-auto",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
+```
 
-# Check routing status
-curl http://localhost:8000/health
+## CLI options
+
+```bash
+aiburstcloud                            # start on 0.0.0.0:8000
+aiburstcloud --port 9000                # custom port
+aiburstcloud --burst-mode cloud_burst   # override burst mode
+aiburstcloud --workers 4                # multiple workers
+aiburstcloud --version                  # show version
 ```
 
 ## Switch modes
 
-Set `BURST_MODE` in your `.env` or environment:
+Set `BURST_MODE` in your environment:
 
 ```bash
 # Edge-first (default)
-BURST_MODE=edge_burst docker compose up -d
+BURST_MODE=edge_burst aiburstcloud
 
 # Cloud-first
-BURST_MODE=cloud_burst docker compose up -d
+BURST_MODE=cloud_burst aiburstcloud
 ```
 
 Or override per-request with a header:

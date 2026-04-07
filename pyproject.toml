@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aiburstcloud"
+version = "0.1.0"
+description = "Dual-mode cloud burst LLM router. Edge-first or cloud-first inference with data sovereignty, cost controls, and automatic failover."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Collin Paran" },
+]
+keywords = ["llm", "inference", "routing", "edge-computing", "cloud-burst", "ai-infrastructure"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0",
+]
+
+[project.urls]
+Homepage = "https://aiburstcloud.com"
+Repository = "https://github.com/aiburstcloud/aiburstcloud"
+Issues = "https://github.com/aiburstcloud/aiburstcloud/issues"
+
+[project.scripts]
+aiburstcloud = "app.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
