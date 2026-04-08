@@ -4,6 +4,10 @@
 
 [aiburstcloud.com](https://aiburstcloud.com)
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/aiburstcloud/docs/main/demo/aiburstcloud-demo.gif" alt="AI Burst Cloud demo" width="800">
+</p>
+
 ## Install
 
 **One line:**
