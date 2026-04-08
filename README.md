@@ -192,23 +192,83 @@ The skill lets your AI agent manage the burst router: start/stop, check health, 
 
 ## Contributing
 
+Contributions are welcome. Here's how to get started.
+
+### Development setup
+
+```bash
+git clone https://github.com/aiburstcloud/aiburstcloud.git
+cd aiburstcloud
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cp .env.example .env
+# Edit .env with your local/cloud endpoints
+aiburstcloud
+```
+
+### Project structure
+
+```
+aiburstcloud/
+  app/
+    router.py          # Core routing engine and FastAPI app
+    cli.py             # CLI entry point (aiburstcloud command)
+    __main__.py        # python -m app support
+    __init__.py        # Package version
+  skills/
+    aiburstcloud/
+      SKILL.md         # OpenClaw skill definition
+      nemoclaw/
+        network-policy.yaml  # NemoClaw sandbox network policy
+  scripts/
+    audit.sh           # Repo consistency checker
+  install.sh           # One-line curl installer
+  pyproject.toml       # Package metadata and dependencies
+  Dockerfile           # Container build
+  docker-compose.yml   # Docker Compose orchestration
+  .env.example         # Default environment variables
+```
+
+### Making changes
+
+1. **Fork** the repo and create a branch from `main`
+2. Make your changes
+3. If you add a new environment variable, document it in:
+   - `README.md` (environment variables table)
+   - `.env.example`
+   - `skills/aiburstcloud/SKILL.md` (if relevant to the skill)
+4. If you change the version, update it in all three places:
+   - `pyproject.toml`
+   - `app/__init__.py`
+   - `skills/aiburstcloud/SKILL.md`
+5. Run the audit: `./scripts/audit.sh`
+6. Submit a pull request
+
 ### Repo audit
 
-Before submitting a PR, run the audit script to check consistency across the project:
+Before submitting a PR, run the audit script to check consistency:
 
 ```bash
 ./scripts/audit.sh
 ```
 
-This validates:
-- Version numbers match across `pyproject.toml`, `app/__init__.py`, and `skills/aiburstcloud/SKILL.md`
-- All environment variables in code are documented in README and `.env.example`
-- Dependencies are in sync between `pyproject.toml` and `requirements.txt`
-- All install methods are documented (pip, curl, Docker, OpenClaw)
-- Dockerfile, OpenClaw skill, and NemoClaw network policy are valid
-- All repository links point to `aiburstcloud/aiburstcloud`
+This validates version sync, env var documentation, dependency consistency, install method docs, skill/policy validity, and repo links. Exits `0` on success, `1` on failure.
 
-The script exits `0` on success and `1` if any check fails.
+### Areas we'd love help with
+
+- **New backend integrations** — adapters for Groq, Cerebras, AWS Bedrock, etc.
+- **Advanced sensitivity classifiers** — NLP-based PII/PHI detection beyond keyword matching
+- **Dashboard UI** — web interface for routing analytics, cost tracking, and mode switching
+- **Helm chart** — Kubernetes deployment
+- **Tests** — unit and integration test coverage
+- **Documentation** — tutorials, integration guides, architecture deep-dives
+
+### Code style
+
+- Keep it simple. No abstractions for one-time operations.
+- Follow existing patterns in `router.py`.
+- No type stubs, docstrings, or comments unless the logic isn't self-evident.
 
 ## License
 
