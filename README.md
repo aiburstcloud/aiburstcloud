@@ -24,6 +24,14 @@ pip install git+https://github.com/aiburstcloud/aiburstcloud.git
 aiburstcloud
 ```
 
+**OpenClaw / NemoClaw skill:**
+
+```bash
+openclaw skills install aiburstcloud
+```
+
+Or copy the `skills/aiburstcloud/` directory into your OpenClaw skills folder. Works with NemoClaw sandboxing out of the box (network policy included).
+
 ## Two burst modes
 
 ### Edge-first burst (`edge_burst`)
@@ -164,6 +172,23 @@ Every response includes routing metadata:
 **Local:** Ollama, vLLM, llama.cpp (OpenAI-compatible mode), LM Studio, LocalAI
 
 **Cloud:** RunPod Serverless, Modal, Google Cloud Run GPU, any OpenAI-compatible vLLM endpoint
+
+## OpenClaw / NemoClaw Skill
+
+AI Burst Cloud ships as an OpenClaw skill. Install it with:
+
+```bash
+openclaw skills install aiburstcloud
+```
+
+Or manually copy `skills/aiburstcloud/` into any of these directories:
+- `<workspace>/skills/`
+- `~/.openclaw/skills/`
+- `~/.agents/skills/`
+
+The skill lets your AI agent manage the burst router: start/stop, check health, switch modes, monitor spend, and send routed requests.
+
+**NemoClaw compatible:** Includes a deny-by-default network policy at `skills/aiburstcloud/nemoclaw/network-policy.yaml`. Local inference is always allowed. Cloud provider egress requires operator approval.
 
 ## License
 

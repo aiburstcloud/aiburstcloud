@@ -1,0 +1,66 @@
+# NemoClaw network policy for AI Burst Cloud
+# Deny-by-default with explicit allowlist for required endpoints.
+#
+# AI Burst Cloud needs to reach:
+# 1. Local inference backend (Ollama/vLLM on localhost)
+# 2. Cloud inference backend (user-configured, e.g. RunPod, Modal)
+# 3. GitHub for install/updates (one-time)
+
+apiVersion: nemoclaw/v1
+kind: NetworkPolicy
+metadata:
+  name: aiburstcloud
+  description: Network policy for AI Burst Cloud LLM router skill
+
+endpoints:
+  # Local inference — always allowed (stays within sandbox network)
+  local_inference:
+    hosts:
+      - "localhost"
+      - "127.0.0.1"
+      - "host.docker.internal"
+    ports:
+      - 11434    # Ollama default
+      - 8080     # vLLM / generic
+      - 8000     # AI Burst Cloud router
+    allow:
+      methods: ["GET", "POST"]
+    description: "Local LLM inference backends (Ollama, vLLM, llama.cpp)"
+
+  # Cloud inference — operator must approve specific provider
+  cloud_inference:
+    hosts:
+      - "api.runpod.ai"
+      - "*.modal.run"
+      - "api.together.xyz"
+      - "api.fireworks.ai"
+      - "*.endpoints.huggingface.cloud"
+    ports:
+      - 443
+    allow:
+      methods: ["POST"]
+    description: "Cloud LLM inference providers (RunPod, Modal, Together, Fireworks)"
+    requires_approval: true
+
+  # GitHub — for installation only
+  github:
+    hosts:
+      - "github.com"
+      - "raw.githubusercontent.com"
+      - "objects.githubusercontent.com"
+    ports:
+      - 443
+    allow:
+      methods: ["GET"]
+    description: "GitHub for skill installation and updates"
+
+  # PyPI — for pip install
+  pypi:
+    hosts:
+      - "pypi.org"
+      - "files.pythonhosted.org"
+    ports:
+      - 443
+    allow:
+      methods: ["GET"]
+    description: "Python Package Index for dependency installation"
