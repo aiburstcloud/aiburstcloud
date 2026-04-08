@@ -190,6 +190,26 @@ The skill lets your AI agent manage the burst router: start/stop, check health, 
 
 **NemoClaw compatible:** Includes a deny-by-default network policy at `skills/aiburstcloud/nemoclaw/network-policy.yaml`. Local inference is always allowed. Cloud provider egress requires operator approval.
 
+## Contributing
+
+### Repo audit
+
+Before submitting a PR, run the audit script to check consistency across the project:
+
+```bash
+./scripts/audit.sh
+```
+
+This validates:
+- Version numbers match across `pyproject.toml`, `app/__init__.py`, and `skills/aiburstcloud/SKILL.md`
+- All environment variables in code are documented in README and `.env.example`
+- Dependencies are in sync between `pyproject.toml` and `requirements.txt`
+- All install methods are documented (pip, curl, Docker, OpenClaw)
+- Dockerfile, OpenClaw skill, and NemoClaw network policy are valid
+- All repository links point to `aiburstcloud/aiburstcloud`
+
+The script exits `0` on success and `1` if any check fails.
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
