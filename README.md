@@ -36,6 +36,19 @@ openclaw skills install aiburstcloud
 
 Or copy the `skills/aiburstcloud/` directory into your OpenClaw skills folder. Works with NemoClaw sandboxing out of the box (network policy included).
 
+**Claude Code skill:**
+
+Clone the repo and the skill is auto-discovered:
+
+```bash
+git clone https://github.com/aiburstcloud/aiburstcloud.git
+cd aiburstcloud
+# Then in Claude Code:
+# /aiburstcloud start
+# /aiburstcloud health
+# /aiburstcloud test
+```
+
 ## Two burst modes
 
 ### Edge-first burst (`edge_burst`)
