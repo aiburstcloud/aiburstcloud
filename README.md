@@ -1,5 +1,10 @@
 # AI Burst Cloud
 
+[![GitHub stars](https://img.shields.io/github/stars/aiburstcloud/aiburstcloud?style=social)](https://github.com/aiburstcloud/aiburstcloud/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![GitHub issues](https://img.shields.io/github/issues/aiburstcloud/aiburstcloud)](https://github.com/aiburstcloud/aiburstcloud/issues)
+[![GitHub last commit](https://img.shields.io/github/last-commit/aiburstcloud/aiburstcloud)](https://github.com/aiburstcloud/aiburstcloud/commits/main)
+
 **Dual-mode cloud burst LLM router.** Route inference between local GPUs and cloud serverless backends with automatic failover, data sovereignty controls, and cost management.
 
 [aiburstcloud.com](https://aiburstcloud.com)
@@ -286,6 +291,12 @@ This validates version sync, env var documentation, dependency consistency, inst
 - Keep it simple. No abstractions for one-time operations.
 - Follow existing patterns in `router.py`.
 - No type stubs, docstrings, or comments unless the logic isn't self-evident.
+
+## Support
+
+If AI Burst Cloud helps you save on inference costs or keep sensitive data local, consider giving it a star. It helps others discover the project.
+
+[![Star on GitHub](https://img.shields.io/github/stars/aiburstcloud/aiburstcloud?style=social)](https://github.com/aiburstcloud/aiburstcloud/stargazers)
 
 ## License
 
