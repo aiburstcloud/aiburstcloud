@@ -1,6 +1,7 @@
 # AI Burst Cloud
 
 [![GitHub stars](https://img.shields.io/github/stars/aiburstcloud/aiburstcloud?style=social)](https://github.com/aiburstcloud/aiburstcloud/stargazers)
+[![CI](https://github.com/aiburstcloud/aiburstcloud/actions/workflows/ci.yml/badge.svg)](https://github.com/aiburstcloud/aiburstcloud/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![GitHub issues](https://img.shields.io/github/issues/aiburstcloud/aiburstcloud)](https://github.com/aiburstcloud/aiburstcloud/issues)
 [![GitHub last commit](https://img.shields.io/github/last-commit/aiburstcloud/aiburstcloud)](https://github.com/aiburstcloud/aiburstcloud/commits/main)
@@ -223,11 +224,13 @@ git clone https://github.com/aiburstcloud/aiburstcloud.git
 cd aiburstcloud
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
 cp .env.example .env
 # Edit .env with your local/cloud endpoints
 aiburstcloud
 ```
+
+Run the tests with `python -m pytest tests/`. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ### Project structure
 
@@ -243,6 +246,8 @@ aiburstcloud/
       SKILL.md         # OpenClaw skill definition
       nemoclaw/
         network-policy.yaml  # NemoClaw sandbox network policy
+  tests/
+    test_router.py     # Routing engine unit tests
   scripts/
     audit.sh           # Repo consistency checker
   install.sh           # One-line curl installer
@@ -264,8 +269,9 @@ aiburstcloud/
    - `pyproject.toml`
    - `app/__init__.py`
    - `skills/aiburstcloud/SKILL.md`
-5. Run the audit: `./scripts/audit.sh`
-6. Submit a pull request
+5. Run the tests: `python -m pytest tests/`
+6. Run the audit: `./scripts/audit.sh`
+7. Submit a pull request
 
 ### Repo audit
 
@@ -283,7 +289,7 @@ This validates version sync, env var documentation, dependency consistency, inst
 - **Advanced sensitivity classifiers** — NLP-based PII/PHI detection beyond keyword matching
 - **Dashboard UI** — web interface for routing analytics, cost tracking, and mode switching
 - **Helm chart** — Kubernetes deployment
-- **Tests** — unit and integration test coverage
+- **Tests** — expand unit and integration test coverage
 - **Documentation** — tutorials, integration guides, architecture deep-dives
 
 ### Code style
