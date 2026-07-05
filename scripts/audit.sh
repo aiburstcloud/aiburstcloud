@@ -15,9 +15,11 @@ PASS=0
 FAIL=0
 WARN=0
 
-pass() { ((PASS++)); printf "  \033[32m✓\033[0m %s\n" "$1"; }
-fail() { ((FAIL++)); printf "  \033[31m✗\033[0m %s\n" "$1"; }
-warn() { ((WARN++)); printf "  \033[33m!\033[0m %s\n" "$1"; }
+# Note: $((VAR+1)) rather than ((VAR++)) — the latter returns exit status 1
+# when the variable is 0, which aborts the script under `set -e`.
+pass() { PASS=$((PASS+1)); printf "  \033[32m✓\033[0m %s\n" "$1"; }
+fail() { FAIL=$((FAIL+1)); printf "  \033[31m✗\033[0m %s\n" "$1"; }
+warn() { WARN=$((WARN+1)); printf "  \033[33m!\033[0m %s\n" "$1"; }
 section() { printf "\n\033[1m%s\033[0m\n" "$1"; }
 
 # ─── Version Consistency ──────────────────────────────────────────
