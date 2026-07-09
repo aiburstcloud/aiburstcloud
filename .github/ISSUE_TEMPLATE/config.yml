@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/aiburstcloud/aiburstcloud/blob/main/SECURITY.md
+    about: Please report security vulnerabilities privately — see our security policy.
+  - name: Project website
+    url: https://aiburstcloud.com
+    about: Docs and project overview.

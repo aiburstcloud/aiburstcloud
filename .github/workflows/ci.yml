@@ -22,7 +22,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install package
-        run: pip install .
+        run: pip install ".[dev]"
 
       - name: Verify CLI entry point
         run: aiburstcloud --version
@@ -32,6 +32,9 @@ jobs:
 
       - name: Check syntax (all Python files)
         run: python -m py_compile app/router.py && python -m py_compile app/cli.py && python -m py_compile app/__main__.py
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
 
   audit:
     runs-on: ubuntu-latest

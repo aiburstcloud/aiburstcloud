@@ -4,6 +4,19 @@ All notable changes to AI Burst Cloud will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Unit test suite for the routing engine (`tests/test_router.py`): sensitivity classifier, cost tracker, dual-mode route decisions, observability endpoints
+- `pytest` runs in CI across Python 3.10–3.13
+- `dev` optional dependency group (`pip install -e ".[dev]"`)
+- CI status badge in README
+- `CONTRIBUTING.md`
+- Issue template `config.yml` (blank issues disabled, security policy and website links)
+
+### Fixed
+- `scripts/audit.sh` aborted on its first successful check: `((PASS++))` returns exit status 1 when the counter is 0, which `set -e` treats as a failure. This made the CI audit job fail even though every check passed.
+
 ## [0.1.0] - 2026-04-09
 
 ### Added
