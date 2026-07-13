@@ -369,7 +369,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Burst Cloud",
     description="Dual-mode cloud burst LLM router — edge-first or cloud-first",
-    version="0.1.0",
+    version="0.1.1",
     lifespan=lifespan,
 )
 
