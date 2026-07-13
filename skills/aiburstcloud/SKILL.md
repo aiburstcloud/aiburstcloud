@@ -3,7 +3,7 @@ name: aiburstcloud
 description: Dual-mode cloud burst LLM router. Route inference between local GPU and
   cloud with automatic failover, data sovereignty, and cost controls. Manage and query
   your AI Burst Cloud instance.
-version: 0.1.0
+version: 0.1.1
 homepage: https://aiburstcloud.com
 when: When user mentions 'burst routing', 'cloud burst', 'local inference', 'LLM routing',
   'aiburstcloud', 'AI Burst Cloud', 'inference routing', 'edge burst', or wants to
