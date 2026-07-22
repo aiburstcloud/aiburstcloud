@@ -57,6 +57,7 @@ def make_tracker(budget=5.0, spent=0.0):
 # Sensitivity classifier
 # ---------------------------------------------------------------------------
 
+
 class TestClassifySensitivity:
     def test_no_keywords_is_public(self):
         messages = [{"role": "user", "content": "What's the weather like?"}]
@@ -92,6 +93,7 @@ class TestClassifySensitivity:
 # ---------------------------------------------------------------------------
 # Cost tracker
 # ---------------------------------------------------------------------------
+
 
 class TestCostTracker:
     def test_cloud_usage_accumulates_spend(self):
@@ -132,6 +134,7 @@ class TestCostTracker:
 # Backend metrics
 # ---------------------------------------------------------------------------
 
+
 class TestBackendMetrics:
     def test_avg_latency_zero_when_no_requests(self):
         assert BackendMetrics("local").avg_latency_ms == 0.0
@@ -146,6 +149,7 @@ class TestBackendMetrics:
 # ---------------------------------------------------------------------------
 # Route decisions — edge_first mode
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeFirstRouting:
     def test_idle_routes_to_local(self):
@@ -239,6 +243,7 @@ class TestEdgeFirstRouting:
 # Route decisions — cloud_first mode
 # ---------------------------------------------------------------------------
 
+
 class TestCloudFirstRouting:
     def test_idle_routes_to_cloud(self):
         decision = decide_route(
@@ -297,6 +302,41 @@ class TestCloudFirstRouting:
 
 
 # ---------------------------------------------------------------------------
+# Concurrency safety — per-request mode override must not mutate global state
+# ---------------------------------------------------------------------------
+
+
+class TestModeOverrideConcurrency:
+    def test_override_does_not_mutate_config(self):
+        """decide_route with burst_mode_override leaves config unchanged."""
+        cfg = make_config(burst_mode=BurstMode.EDGE_FIRST)
+        decision = decide_route(
+            SensitivityLevel.PUBLIC,
+            make_metrics("local"),
+            make_metrics("cloud"),
+            make_tracker(),
+            cfg,
+            burst_mode_override=BurstMode.CLOUD_FIRST,
+        )
+        assert decision.backend == "cloud"
+        assert decision.burst_mode == BurstMode.CLOUD_FIRST
+        assert cfg.burst_mode == BurstMode.EDGE_FIRST
+
+    def test_none_override_uses_config_default(self):
+        cfg = make_config(burst_mode=BurstMode.EDGE_FIRST)
+        decision = decide_route(
+            SensitivityLevel.PUBLIC,
+            make_metrics("local"),
+            make_metrics("cloud"),
+            make_tracker(),
+            cfg,
+            burst_mode_override=None,
+        )
+        assert decision.backend == "local"
+        assert decision.burst_mode == BurstMode.EDGE_FIRST
+
+
+# ---------------------------------------------------------------------------
 # Observability endpoints
 # ---------------------------------------------------------------------------
 
@@ -317,8 +357,10 @@ class TestEndpoints:
         assert body["burst_mode"] in [m.value for m in BurstMode]
         assert {"local", "cloud", "cost"} <= body.keys()
 
-    def test_metrics_exposes_prometheus_lines(self):
+    def test_metrics_exposes_prometheus_format(self):
         r = client.get("/metrics")
         assert r.status_code == 200
-        assert "aiburstcloud_local_requests_total" in r.text
-        assert "aiburstcloud_cloud_budget_remaining_usd" in r.text
+        assert "text/plain" in r.headers["content-type"]
+        assert "# TYPE aiburstcloud_requests_total counter" in r.text
+        assert "# HELP aiburstcloud_cloud_budget_remaining_usd" in r.text
+        assert 'aiburstcloud_requests_total{backend="local"}' in r.text

@@ -16,36 +16,43 @@ Exposes an OpenAI-compatible /v1/chat/completions endpoint.
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
+import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 class BurstMode(str, Enum):
-    EDGE_FIRST = "edge_burst"    # local baseline, cloud overflow
+    EDGE_FIRST = "edge_burst"  # local baseline, cloud overflow
     CLOUD_FIRST = "cloud_burst"  # cloud baseline, local for sensitive
+
 
 class SensitivityLevel(str, Enum):
     PUBLIC = "public"
     INTERNAL = "internal"
     SENSITIVE = "sensitive"
 
+
 class BackendStatus(str, Enum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     DOWN = "down"
+
 
 class RouterConfig(BaseModel):
     # Burst mode
@@ -54,14 +61,18 @@ class RouterConfig(BaseModel):
     )
 
     # Local backend (Orin / Ollama / any local vLLM)
-    local_url: str = Field(default_factory=lambda: os.getenv("LOCAL_URL", "http://localhost:11434"))
+    local_url: str = Field(
+        default_factory=lambda: os.getenv("LOCAL_URL", "http://localhost:11434")
+    )
     local_model: str = Field(default_factory=lambda: os.getenv("LOCAL_MODEL", "qwen3.5-35b-a3b"))
     local_max_queue: int = int(os.getenv("LOCAL_MAX_QUEUE", "5"))
     local_latency_threshold_ms: float = float(os.getenv("LOCAL_LATENCY_THRESHOLD_MS", "2000"))
 
     # Cloud backend (RunPod / Modal / any serverless vLLM)
     cloud_url: str = Field(default_factory=lambda: os.getenv("CLOUD_URL", ""))
-    cloud_model: str = Field(default_factory=lambda: os.getenv("CLOUD_MODEL", "Qwen/Qwen3.5-35B-A3B-AWQ"))
+    cloud_model: str = Field(
+        default_factory=lambda: os.getenv("CLOUD_MODEL", "Qwen/Qwen3.5-35B-A3B-AWQ")
+    )
     cloud_api_key: str = Field(default_factory=lambda: os.getenv("CLOUD_API_KEY", ""))
     cloud_max_queue: int = int(os.getenv("CLOUD_MAX_QUEUE", "50"))
     cloud_latency_threshold_ms: float = float(os.getenv("CLOUD_LATENCY_THRESHOLD_MS", "5000"))
@@ -71,18 +82,24 @@ class RouterConfig(BaseModel):
     cloud_cost_per_1k_tokens: float = float(os.getenv("CLOUD_COST_PER_1K_TOKENS", "0.002"))
 
     # Sensitivity keywords — force routing to local in both modes
-    sensitive_keywords: list[str] = Field(default_factory=lambda: [
-        kw.strip() for kw in os.getenv(
-            "SENSITIVE_KEYWORDS",
-            "ais,mmsi,imo,vessel,maritime,sigint,intelligence,classified,"
-            "geoint,icd203,satellite,sentinel,umbra,sar,ads-b,icao,aircraft,track,"
-            "pii,ssn,hipaa,phi,secret,top secret,noforn"
-        ).split(",") if kw.strip()
-    ])
+    sensitive_keywords: list[str] = Field(
+        default_factory=lambda: [
+            kw.strip()
+            for kw in os.getenv(
+                "SENSITIVE_KEYWORDS",
+                "ais,mmsi,imo,vessel,maritime,sigint,intelligence,classified,"
+                "geoint,icd203,satellite,sentinel,umbra,sar,ads-b,icao,aircraft,track,"
+                "pii,ssn,hipaa,phi,secret,top secret,noforn",
+            ).split(",")
+            if kw.strip()
+        ]
+    )
+
 
 # ---------------------------------------------------------------------------
 # State tracking
 # ---------------------------------------------------------------------------
+
 
 class BackendMetrics:
     def __init__(self, name: str):
@@ -101,7 +118,7 @@ class BackendMetrics:
             return 0.0
         return self.total_latency_ms / self.total_requests
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "status": self.status,
@@ -120,19 +137,19 @@ class CostTracker:
         self.total_tokens_cloud: int = 0
         self.total_tokens_local: int = 0
 
-    def check_and_reset(self):
+    def check_and_reset(self) -> None:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if today != self.today_date:
             self.today_spend = 0.0
             self.today_date = today
 
-    def record_cloud_usage(self, tokens: int, cost_per_1k: float):
+    def record_cloud_usage(self, tokens: int, cost_per_1k: float) -> None:
         self.check_and_reset()
         cost = (tokens / 1000) * cost_per_1k
         self.today_spend += cost
         self.total_tokens_cloud += tokens
 
-    def record_local_usage(self, tokens: int):
+    def record_local_usage(self, tokens: int) -> None:
         self.total_tokens_local += tokens
 
     @property
@@ -144,11 +161,13 @@ class CostTracker:
     def budget_exhausted(self) -> bool:
         return self.budget_remaining <= 0.0
 
+
 # ---------------------------------------------------------------------------
 # Sensitivity classifier
 # ---------------------------------------------------------------------------
 
-def classify_sensitivity(messages: list[dict], keywords: list[str]) -> SensitivityLevel:
+
+def classify_sensitivity(messages: list[dict[str, Any]], keywords: list[str]) -> SensitivityLevel:
     text = " ".join(
         msg.get("content", "") for msg in messages if isinstance(msg.get("content"), str)
     ).lower()
@@ -161,12 +180,14 @@ def classify_sensitivity(messages: list[dict], keywords: list[str]) -> Sensitivi
         return SensitivityLevel.INTERNAL
     return SensitivityLevel.PUBLIC
 
+
 # ---------------------------------------------------------------------------
 # Route decision engine — dual mode
 # ---------------------------------------------------------------------------
 
+
 class RouteDecision(BaseModel):
-    backend: str              # "local" or "cloud"
+    backend: str  # "local" or "cloud"
     reason: str
     burst_mode: BurstMode
     sensitivity: SensitivityLevel
@@ -180,6 +201,7 @@ def decide_route(
     cloud_metrics: BackendMetrics,
     cost_tracker: CostTracker,
     config: RouterConfig,
+    burst_mode_override: BurstMode | None = None,
 ) -> RouteDecision:
     """
     Dual-mode routing:
@@ -189,7 +211,7 @@ def decide_route(
 
     In BOTH modes, SENSITIVE data always routes to local.
     """
-    mode = config.burst_mode
+    mode = burst_mode_override if burst_mode_override is not None else config.burst_mode
 
     if mode == BurstMode.EDGE_FIRST:
         primary, overflow = "local", "cloud"
@@ -204,45 +226,34 @@ def decide_route(
         max_queue = config.cloud_max_queue
         latency_threshold = config.cloud_latency_threshold_ms
 
-    base = dict(
-        burst_mode=mode,
-        sensitivity=sensitivity,
-        primary_queue_depth=primary_metrics.active_requests,
-        budget_remaining_usd=cost_tracker.budget_remaining,
-    )
+    queue_depth = primary_metrics.active_requests
+    budget_remaining = cost_tracker.budget_remaining
+
+    def _decision(backend: str, reason: str) -> RouteDecision:
+        return RouteDecision(
+            backend=backend,
+            reason=reason,
+            burst_mode=mode,
+            sensitivity=sensitivity,
+            primary_queue_depth=queue_depth,
+            budget_remaining_usd=budget_remaining,
+        )
 
     # ----- AXIS 1: Data sovereignty (always wins) -----
     if sensitivity == SensitivityLevel.SENSITIVE:
-        return RouteDecision(
-            backend="local",
-            reason="sensitive_data_local_only",
-            **base,
-        )
+        return _decision("local", "sensitive_data_local_only")
 
     # ----- AXIS 2: Cost gate (cloud budget) -----
     # In edge_first: if budget gone, stay local (no burst)
     # In cloud_first: if budget gone, fall back to local for everything
     if cost_tracker.budget_exhausted:
-        return RouteDecision(
-            backend="local",
-            reason="daily_cloud_budget_exhausted",
-            **base,
-        )
+        return _decision("local", "daily_cloud_budget_exhausted")
 
     # ----- AXIS 3: Primary backend health -----
     if primary_metrics.status == BackendStatus.DOWN:
-        # If primary is down and data allows overflow, use it
         if sensitivity != SensitivityLevel.SENSITIVE:
-            return RouteDecision(
-                backend=overflow,
-                reason=f"{primary}_down_failover_to_{overflow}",
-                **base,
-            )
-        return RouteDecision(
-            backend="local",
-            reason=f"{primary}_down_but_sensitive_queuing_local",
-            **base,
-        )
+            return _decision(overflow, f"{primary}_down_failover_to_{overflow}")
+        return _decision("local", f"{primary}_down_but_sensitive_queuing_local")
 
     # ----- AXIS 3: Latency / queue depth triggers burst -----
     primary_overloaded = (
@@ -250,33 +261,30 @@ def decide_route(
         or primary_metrics.avg_latency_ms > latency_threshold
     )
 
-    if primary_overloaded and overflow_metrics.status != BackendStatus.DOWN:
-        # In cloud_first mode, "overflow" is local — always safe
-        # In edge_first mode, "overflow" is cloud — only for PUBLIC
-        if mode == BurstMode.CLOUD_FIRST or sensitivity == SensitivityLevel.PUBLIC:
-            return RouteDecision(
-                backend=overflow,
-                reason=f"{primary}_overloaded_burst_to_{overflow}",
-                **base,
-            )
+    # In cloud_first mode, "overflow" is local — always safe
+    # In edge_first mode, "overflow" is cloud — only for PUBLIC
+    if (
+        primary_overloaded
+        and overflow_metrics.status != BackendStatus.DOWN
+        and (mode == BurstMode.CLOUD_FIRST or sensitivity == SensitivityLevel.PUBLIC)
+    ):
+        return _decision(overflow, f"{primary}_overloaded_burst_to_{overflow}")
 
     # ----- Default: use primary -----
-    return RouteDecision(
-        backend=primary,
-        reason=f"{primary}_available",
-        **base,
-    )
+    return _decision(primary, f"{primary}_available")
+
 
 # ---------------------------------------------------------------------------
 # HTTP proxy
 # ---------------------------------------------------------------------------
 
+
 async def proxy_to_backend(
     client: httpx.AsyncClient,
     url: str,
     model: str,
-    payload: dict,
-    api_key: Optional[str] = None,
+    payload: dict[str, Any],
+    api_key: str | None = None,
     stream: bool = False,
 ) -> httpx.Response:
     headers = {"Content-Type": "application/json"}
@@ -298,18 +306,20 @@ async def proxy_to_backend(
     else:
         return await client.post(endpoint, json=payload, headers=headers, timeout=120.0)
 
+
 # ---------------------------------------------------------------------------
 # Health checker
 # ---------------------------------------------------------------------------
+
 
 async def health_check_loop(
     client: httpx.AsyncClient,
     config: RouterConfig,
     local_metrics: BackendMetrics,
     cloud_metrics: BackendMetrics,
-):
+) -> None:
     while True:
-        for name, url, api_key, metrics in [
+        for _name, url, api_key, metrics in [
             ("local", config.local_url, None, local_metrics),
             ("cloud", config.cloud_url, config.cloud_api_key, cloud_metrics),
         ]:
@@ -340,6 +350,7 @@ async def health_check_loop(
 
         await asyncio.sleep(15)
 
+
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
@@ -349,17 +360,44 @@ local_metrics = BackendMetrics("local")
 cloud_metrics = BackendMetrics("cloud")
 cost_tracker = CostTracker(daily_budget=config.daily_cloud_budget_usd)
 
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        entry: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for key in (
+            "request_id",
+            "backend",
+            "mode",
+            "reason",
+            "sensitivity",
+            "queue_depth",
+            "budget_remaining_usd",
+        ):
+            val = getattr(record, key, None)
+            if val is not None:
+                entry[key] = val
+        if record.exc_info and record.exc_info[0]:
+            entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(entry)
+
+
 logger = logging.getLogger("aiburstcloud")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
+_handler = logging.StreamHandler()
+_handler.setFormatter(JSONFormatter())
+logger.handlers = [_handler]
+logger.setLevel(logging.INFO)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     client = httpx.AsyncClient()
     app.state.client = client
-    task = asyncio.create_task(
-        health_check_loop(client, config, local_metrics, cloud_metrics)
-    )
+    task = asyncio.create_task(health_check_loop(client, config, local_metrics, cloud_metrics))
     logger.info(f"AI Burst Cloud starting in {config.burst_mode.value} mode")
     yield
     task.cancel()
@@ -375,16 +413,17 @@ app = FastAPI(
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: Request):
+async def chat_completions(request: Request) -> Any:
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     payload = await request.json()
     messages = payload.get("messages", [])
     stream = payload.get("stream", False)
 
-    # Allow per-request mode override via header
-    mode_override = request.headers.get("X-Burst-Mode")
-    original_mode = config.burst_mode
-    if mode_override and mode_override in [m.value for m in BurstMode]:
-        config.burst_mode = BurstMode(mode_override)
+    # Resolve per-request mode override without mutating shared state
+    mode_override_header = request.headers.get("X-Burst-Mode")
+    burst_mode_override: BurstMode | None = None
+    if mode_override_header and mode_override_header in [m.value for m in BurstMode]:
+        burst_mode_override = BurstMode(mode_override_header)
 
     sensitivity = classify_sensitivity(messages, config.sensitive_keywords)
 
@@ -394,16 +433,20 @@ async def chat_completions(request: Request):
         cloud_metrics=cloud_metrics,
         cost_tracker=cost_tracker,
         config=config,
+        burst_mode_override=burst_mode_override,
     )
 
-    # Restore mode if overridden
-    config.burst_mode = original_mode
-
     logger.info(
-        f"Route: {decision.backend} | mode={decision.burst_mode.value} | "
-        f"reason={decision.reason} | sensitivity={decision.sensitivity} | "
-        f"queue={decision.primary_queue_depth} | "
-        f"budget=${decision.budget_remaining_usd:.2f}"
+        "route_decision",
+        extra={
+            "request_id": request_id,
+            "backend": decision.backend,
+            "mode": decision.burst_mode.value,
+            "reason": decision.reason,
+            "sensitivity": decision.sensitivity.value,
+            "queue_depth": decision.primary_queue_depth,
+            "budget_remaining_usd": decision.budget_remaining_usd,
+        },
     )
 
     client: httpx.AsyncClient = request.app.state.client
@@ -424,11 +467,9 @@ async def chat_completions(request: Request):
 
     try:
         if stream:
-            response = await proxy_to_backend(
-                client, url, model, payload, api_key, stream=True
-            )
+            response = await proxy_to_backend(client, url, model, payload, api_key, stream=True)
 
-            async def stream_and_track():
+            async def stream_and_track() -> AsyncGenerator[bytes, None]:
                 total_tokens = 0
                 try:
                     async for chunk in response.aiter_bytes():
@@ -453,6 +494,7 @@ async def chat_completions(request: Request):
                 stream_and_track(),
                 media_type="text/event-stream",
                 headers={
+                    "X-Request-ID": request_id,
                     "X-Burst-Backend": decision.backend,
                     "X-Burst-Mode": decision.burst_mode.value,
                     "X-Burst-Reason": decision.reason,
@@ -460,9 +502,7 @@ async def chat_completions(request: Request):
                 },
             )
         else:
-            response = await proxy_to_backend(
-                client, url, model, payload, api_key, stream=False
-            )
+            response = await proxy_to_backend(client, url, model, payload, api_key, stream=False)
             elapsed = (time.monotonic() - start) * 1000
             metrics.active_requests -= 1
             metrics.total_requests += 1
@@ -473,13 +513,12 @@ async def chat_completions(request: Request):
             metrics.total_tokens += total_tokens
 
             if decision.backend == "cloud":
-                cost_tracker.record_cloud_usage(
-                    total_tokens, config.cloud_cost_per_1k_tokens
-                )
+                cost_tracker.record_cloud_usage(total_tokens, config.cloud_cost_per_1k_tokens)
             else:
                 cost_tracker.record_local_usage(total_tokens)
 
             data["_burst"] = {
+                "request_id": request_id,
                 "backend": decision.backend,
                 "mode": decision.burst_mode.value,
                 "reason": decision.reason,
@@ -496,11 +535,15 @@ async def chat_completions(request: Request):
         # Failover logic
         failover_backend = "cloud" if decision.backend == "local" else "local"
         if sensitivity != SensitivityLevel.SENSITIVE or failover_backend == "local":
-            logger.warning(f"{decision.backend} unreachable, failing over to {failover_backend}")
+            logger.warning(
+                "failover",
+                extra={"request_id": request_id, "from": decision.backend, "to": failover_backend},
+            )
             try:
-                fo_url = config.cloud_url if failover_backend == "cloud" else config.local_url
-                fo_model = config.cloud_model if failover_backend == "cloud" else config.local_model
-                fo_key = (config.cloud_api_key or None) if failover_backend == "cloud" else None
+                is_cloud = failover_backend == "cloud"
+                fo_url = config.cloud_url if is_cloud else config.local_url
+                fo_model = config.cloud_model if is_cloud else config.local_model
+                fo_key = (config.cloud_api_key or None) if is_cloud else None
 
                 response = await proxy_to_backend(
                     client, fo_url, fo_model, payload, fo_key, stream=stream
@@ -510,28 +553,36 @@ async def chat_completions(request: Request):
                         response.aiter_bytes(),
                         media_type="text/event-stream",
                         headers={
+                            "X-Request-ID": request_id,
                             "X-Burst-Backend": failover_backend,
                             "X-Burst-Reason": "failover",
                         },
                     )
                 return response.json()
             except Exception as e:
-                raise HTTPException(status_code=502, detail=f"All backends unreachable: {e}")
+                raise HTTPException(
+                    status_code=502, detail=f"All backends unreachable: {e}"
+                ) from e
 
-        raise HTTPException(status_code=502, detail="Backend unreachable")
+        raise HTTPException(status_code=502, detail="Backend unreachable") from None
 
     except Exception as e:
         metrics.active_requests -= 1
-        logger.error(f"Request failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(
+            "request_failed",
+            extra={"request_id": request_id},
+            exc_info=e,
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ---------------------------------------------------------------------------
 # Observability
 # ---------------------------------------------------------------------------
 
+
 @app.get("/v1/models")
-async def list_models():
+async def list_models() -> dict[str, Any]:
     return {
         "object": "list",
         "data": [
@@ -541,7 +592,7 @@ async def list_models():
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "burst_mode": config.burst_mode.value,
@@ -557,16 +608,31 @@ async def health():
 
 
 @app.get("/metrics")
-async def metrics():
+async def metrics() -> Response:
     lines = [
+        "# HELP aiburstcloud_burst_mode Active burst mode (1 = active)",
+        "# TYPE aiburstcloud_burst_mode gauge",
         f'aiburstcloud_burst_mode{{mode="{config.burst_mode.value}"}} 1',
-        f'aiburstcloud_local_requests_total {local_metrics.total_requests}',
-        f'aiburstcloud_cloud_requests_total {cloud_metrics.total_requests}',
-        f'aiburstcloud_local_active_requests {local_metrics.active_requests}',
-        f'aiburstcloud_cloud_active_requests {cloud_metrics.active_requests}',
-        f'aiburstcloud_local_tokens_total {local_metrics.total_tokens}',
-        f'aiburstcloud_cloud_tokens_total {cloud_metrics.total_tokens}',
-        f'aiburstcloud_cloud_spend_today_usd {cost_tracker.today_spend:.4f}',
-        f'aiburstcloud_cloud_budget_remaining_usd {cost_tracker.budget_remaining:.4f}',
+        "# HELP aiburstcloud_requests_total Total requests handled per backend",
+        "# TYPE aiburstcloud_requests_total counter",
+        f'aiburstcloud_requests_total{{backend="local"}} {local_metrics.total_requests}',
+        f'aiburstcloud_requests_total{{backend="cloud"}} {cloud_metrics.total_requests}',
+        "# HELP aiburstcloud_active_requests Current in-flight requests per backend",
+        "# TYPE aiburstcloud_active_requests gauge",
+        f'aiburstcloud_active_requests{{backend="local"}} {local_metrics.active_requests}',
+        f'aiburstcloud_active_requests{{backend="cloud"}} {cloud_metrics.active_requests}',
+        "# HELP aiburstcloud_tokens_total Total tokens processed per backend",
+        "# TYPE aiburstcloud_tokens_total counter",
+        f'aiburstcloud_tokens_total{{backend="local"}} {local_metrics.total_tokens}',
+        f'aiburstcloud_tokens_total{{backend="cloud"}} {cloud_metrics.total_tokens}',
+        "# HELP aiburstcloud_cloud_spend_today_usd Cloud spend for current UTC day",
+        "# TYPE aiburstcloud_cloud_spend_today_usd gauge",
+        f"aiburstcloud_cloud_spend_today_usd {cost_tracker.today_spend:.4f}",
+        "# HELP aiburstcloud_cloud_budget_remaining_usd Remaining daily cloud budget",
+        "# TYPE aiburstcloud_cloud_budget_remaining_usd gauge",
+        f"aiburstcloud_cloud_budget_remaining_usd {cost_tracker.budget_remaining:.4f}",
     ]
-    return "\n".join(lines) + "\n"
+    return Response(
+        content="\n".join(lines) + "\n",
+        media_type="text/plain; version=0.0.4",
+    )
