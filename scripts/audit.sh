@@ -65,8 +65,8 @@ done
 
 section "Environment variable documentation"
 
-# Extract env vars used in router.py (os.getenv / os.environ patterns)
-ROUTER_VARS=$(grep -oE 'os\.(getenv|environ\.get|environ\[)\("?[A-Z0-9_]+' app/router.py | \
+# Extract env vars used in app/ (os.getenv / os.environ patterns)
+ROUTER_VARS=$(grep -roE 'os\.(getenv|environ\.get|environ\[)\("?[A-Z0-9_]+' app/ | \
     grep -oE '[A-Z][A-Z0-9_]+' | sort -u)
 
 # Check each is documented in README
@@ -79,7 +79,7 @@ for var in $ROUTER_VARS; do
 done
 
 # Check each is in .env.example (at least the key ones)
-for var in BURST_MODE LOCAL_URL LOCAL_MODEL CLOUD_URL CLOUD_MODEL CLOUD_API_KEY DAILY_CLOUD_BUDGET_USD; do
+for var in BURST_MODE LOCAL_PROVIDER LOCAL_URL LOCAL_MODEL CLOUD_URL CLOUD_MODEL CLOUD_API_KEY DAILY_CLOUD_BUDGET_USD CLOUD_PROVIDER GROQ_API_KEY GROQ_MODEL; do
     if grep -q "^$var" .env.example; then
         pass "$var in .env.example"
     else

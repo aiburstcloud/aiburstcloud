@@ -15,160 +15,59 @@ Mode 2 — CLOUD FIRST ("cloud_burst")
 Exposes an OpenAI-compatible /v1/chat/completions endpoint.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
-import os
 import time
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from app.state import CostStore
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-
-class BurstMode(str, Enum):
-    EDGE_FIRST = "edge_burst"  # local baseline, cloud overflow
-    CLOUD_FIRST = "cloud_burst"  # cloud baseline, local for sensitive
-
-
-class SensitivityLevel(str, Enum):
-    PUBLIC = "public"
-    INTERNAL = "internal"
-    SENSITIVE = "sensitive"
-
-
-class BackendStatus(str, Enum):
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    DOWN = "down"
-
-
-class RouterConfig(BaseModel):
-    # Burst mode
-    burst_mode: BurstMode = Field(
-        default_factory=lambda: BurstMode(os.getenv("BURST_MODE", "edge_burst"))
-    )
-
-    # Local backend (Orin / Ollama / any local vLLM)
-    local_url: str = Field(
-        default_factory=lambda: os.getenv("LOCAL_URL", "http://localhost:11434")
-    )
-    local_model: str = Field(default_factory=lambda: os.getenv("LOCAL_MODEL", "qwen3.5-35b-a3b"))
-    local_max_queue: int = int(os.getenv("LOCAL_MAX_QUEUE", "5"))
-    local_latency_threshold_ms: float = float(os.getenv("LOCAL_LATENCY_THRESHOLD_MS", "2000"))
-
-    # Cloud backend (RunPod / Modal / any serverless vLLM)
-    cloud_url: str = Field(default_factory=lambda: os.getenv("CLOUD_URL", ""))
-    cloud_model: str = Field(
-        default_factory=lambda: os.getenv("CLOUD_MODEL", "Qwen/Qwen3.5-35B-A3B-AWQ")
-    )
-    cloud_api_key: str = Field(default_factory=lambda: os.getenv("CLOUD_API_KEY", ""))
-    cloud_max_queue: int = int(os.getenv("CLOUD_MAX_QUEUE", "50"))
-    cloud_latency_threshold_ms: float = float(os.getenv("CLOUD_LATENCY_THRESHOLD_MS", "5000"))
-
-    # Cost controls
-    daily_cloud_budget_usd: float = float(os.getenv("DAILY_CLOUD_BUDGET_USD", "5.00"))
-    cloud_cost_per_1k_tokens: float = float(os.getenv("CLOUD_COST_PER_1K_TOKENS", "0.002"))
-
-    # Persistent state (budget survives restarts; shared across workers).
-    # Set to ":memory:" for an ephemeral per-process budget.
-    state_db_path: str = Field(
-        default_factory=lambda: os.getenv("STATE_DB_PATH", "aiburstcloud.db")
-    )
-
-    # Sensitivity keywords — force routing to local in both modes
-    sensitive_keywords: list[str] = Field(
-        default_factory=lambda: [
-            kw.strip()
-            for kw in os.getenv(
-                "SENSITIVE_KEYWORDS",
-                "ais,mmsi,imo,vessel,maritime,sigint,intelligence,classified,"
-                "geoint,icd203,satellite,sentinel,umbra,sar,ads-b,icao,aircraft,track,"
-                "pii,ssn,hipaa,phi,secret,top secret,noforn",
-            ).split(",")
-            if kw.strip()
-        ]
-    )
-
-
-# ---------------------------------------------------------------------------
-# State tracking
-# ---------------------------------------------------------------------------
-
-
-class BackendMetrics:
-    def __init__(self, name: str):
-        self.name = name
-        self.active_requests: int = 0
-        self.total_requests: int = 0
-        self.total_tokens: int = 0
-        self.total_latency_ms: float = 0.0
-        self.last_health_check: float = 0.0
-        self.status: BackendStatus = BackendStatus.HEALTHY
-        self.errors_consecutive: int = 0
-
-    @property
-    def avg_latency_ms(self) -> float:
-        if self.total_requests == 0:
-            return 0.0
-        return self.total_latency_ms / self.total_requests
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "status": self.status,
-            "active_requests": self.active_requests,
-            "total_requests": self.total_requests,
-            "avg_latency_ms": round(self.avg_latency_ms, 1),
-            "total_tokens": self.total_tokens,
-        }
+from app.backends import Backend, create_backends
+from app.models import (
+    BackendMetrics,
+    BackendStatus,
+    BurstMode,
+    RouterConfig,
+    SensitivityLevel,
+)
 
 
 class CostTracker:
-    """Budget accounting backed by a persistent, shared CostStore.
-
-    The store survives restarts and is shared by all processes pointed at
-    the same STATE_DB_PATH, so the daily cloud budget is enforced globally
-    rather than per-process (a restart no longer resets today's spend).
-    """
-
-    def __init__(self, daily_budget: float, store: CostStore | None = None):
+    def __init__(self, daily_budget: float):
         self.daily_budget = daily_budget
-        self.store = store if store is not None else CostStore(":memory:")
+        self.today_spend: float = 0.0
+        self.today_date: str = ""
+        self.total_tokens_cloud: int = 0
+        self.total_tokens_local: int = 0
+
+    def check_and_reset(self) -> None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today != self.today_date:
+            self.today_spend = 0.0
+            self.today_date = today
 
     def record_cloud_usage(self, tokens: int, cost_per_1k: float) -> None:
-        self.store.add_cloud_usage(tokens, (tokens / 1000) * cost_per_1k)
+        self.check_and_reset()
+        cost = (tokens / 1000) * cost_per_1k
+        self.today_spend += cost
+        self.total_tokens_cloud += tokens
 
     def record_local_usage(self, tokens: int) -> None:
-        self.store.add_local_usage(tokens)
-
-    @property
-    def today_spend(self) -> float:
-        return self.store.snapshot().today_spend
-
-    @property
-    def total_tokens_cloud(self) -> int:
-        return self.store.snapshot().total_tokens_cloud
-
-    @property
-    def total_tokens_local(self) -> int:
-        return self.store.snapshot().total_tokens_local
+        self.total_tokens_local += tokens
 
     @property
     def budget_remaining(self) -> float:
+        self.check_and_reset()
         return max(0.0, self.daily_budget - self.today_spend)
 
     @property
@@ -289,78 +188,28 @@ def decide_route(
 
 
 # ---------------------------------------------------------------------------
-# HTTP proxy
-# ---------------------------------------------------------------------------
-
-
-async def proxy_to_backend(
-    client: httpx.AsyncClient,
-    url: str,
-    model: str,
-    payload: dict[str, Any],
-    api_key: str | None = None,
-    stream: bool = False,
-) -> httpx.Response:
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    payload = {**payload, "model": model}
-
-    # Ollama uses /api/chat, vLLM uses /v1/chat/completions
-    # Detect by URL pattern
-    if ":11434" in url and "/v1" not in url:
-        endpoint = f"{url}/v1/chat/completions"
-    else:
-        endpoint = f"{url}/v1/chat/completions"
-
-    if stream:
-        req = client.build_request("POST", endpoint, json=payload, headers=headers)
-        return await client.send(req, stream=True)
-    else:
-        return await client.post(endpoint, json=payload, headers=headers, timeout=120.0)
-
-
-# ---------------------------------------------------------------------------
 # Health checker
 # ---------------------------------------------------------------------------
 
 
 async def health_check_loop(
     client: httpx.AsyncClient,
-    config: RouterConfig,
-    local_metrics: BackendMetrics,
-    cloud_metrics: BackendMetrics,
+    backends: list[Backend],
 ) -> None:
     while True:
-        for _name, url, api_key, metrics in [
-            ("local", config.local_url, None, local_metrics),
-            ("cloud", config.cloud_url, config.cloud_api_key, cloud_metrics),
-        ]:
-            if not url:
-                continue
-            try:
-                headers = {}
-                if api_key:
-                    headers["Authorization"] = f"Bearer {api_key}"
-                # Try OpenAI /v1/models first, fall back to Ollama /api/tags
-                check_url = f"{url}/v1/models"
-                if ":11434" in url:
-                    check_url = f"{url}/api/tags"
-                r = await client.get(check_url, headers=headers, timeout=8.0)
-                if r.status_code == 200:
-                    metrics.status = BackendStatus.HEALTHY
-                    metrics.errors_consecutive = 0
-                else:
-                    metrics.errors_consecutive += 1
-            except Exception:
-                metrics.errors_consecutive += 1
+        for backend in backends:
+            healthy = await backend.health_check(client)
+            if healthy:
+                backend.metrics.status = BackendStatus.HEALTHY
+                backend.metrics.errors_consecutive = 0
+            else:
+                backend.metrics.errors_consecutive += 1
 
-            if metrics.errors_consecutive >= 3:
-                metrics.status = BackendStatus.DOWN
-            elif metrics.errors_consecutive >= 1:
-                metrics.status = BackendStatus.DEGRADED
-            metrics.last_health_check = time.time()
+            if backend.metrics.errors_consecutive >= 3:
+                backend.metrics.status = BackendStatus.DOWN
+            elif backend.metrics.errors_consecutive >= 1:
+                backend.metrics.status = BackendStatus.DEGRADED
+            backend.metrics.last_health_check = time.time()
 
         await asyncio.sleep(15)
 
@@ -370,12 +219,10 @@ async def health_check_loop(
 # ---------------------------------------------------------------------------
 
 config = RouterConfig()
-local_metrics = BackendMetrics("local")
-cloud_metrics = BackendMetrics("cloud")
-cost_tracker = CostTracker(
-    daily_budget=config.daily_cloud_budget_usd,
-    store=CostStore(config.state_db_path),
-)
+local_backend, cloud_backend = create_backends(config)
+local_metrics = local_backend.metrics
+cloud_metrics = cloud_backend.metrics
+cost_tracker = CostTracker(daily_budget=config.daily_cloud_budget_usd)
 
 
 class JSONFormatter(logging.Formatter):
@@ -414,7 +261,7 @@ logger.setLevel(logging.INFO)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     client = httpx.AsyncClient()
     app.state.client = client
-    task = asyncio.create_task(health_check_loop(client, config, local_metrics, cloud_metrics))
+    task = asyncio.create_task(health_check_loop(client, [local_backend, cloud_backend]))
     logger.info(f"AI Burst Cloud starting in {config.burst_mode.value} mode")
     yield
     task.cancel()
@@ -469,22 +316,14 @@ async def chat_completions(request: Request) -> Any:
     client: httpx.AsyncClient = request.app.state.client
     start = time.monotonic()
 
-    if decision.backend == "local":
-        metrics = local_metrics
-        url = config.local_url
-        model = config.local_model
-        api_key = None
-    else:
-        metrics = cloud_metrics
-        url = config.cloud_url
-        model = config.cloud_model
-        api_key = config.cloud_api_key or None
+    backend = local_backend if decision.backend == "local" else cloud_backend
+    metrics = backend.metrics
 
     metrics.active_requests += 1
 
     try:
         if stream:
-            response = await proxy_to_backend(client, url, model, payload, api_key, stream=True)
+            response = await backend.send(client, payload, stream=True)
 
             async def stream_and_track() -> AsyncGenerator[bytes, None]:
                 total_tokens = 0
@@ -519,7 +358,7 @@ async def chat_completions(request: Request) -> Any:
                 },
             )
         else:
-            response = await proxy_to_backend(client, url, model, payload, api_key, stream=False)
+            response = await backend.send(client, payload, stream=False)
             elapsed = (time.monotonic() - start) * 1000
             metrics.active_requests -= 1
             metrics.total_requests += 1
@@ -550,28 +389,21 @@ async def chat_completions(request: Request) -> Any:
         metrics.errors_consecutive += 1
 
         # Failover logic
-        failover_backend = "cloud" if decision.backend == "local" else "local"
-        if sensitivity != SensitivityLevel.SENSITIVE or failover_backend == "local":
+        failover = cloud_backend if decision.backend == "local" else local_backend
+        if sensitivity != SensitivityLevel.SENSITIVE or failover.name == "local":
             logger.warning(
                 "failover",
-                extra={"request_id": request_id, "from": decision.backend, "to": failover_backend},
+                extra={"request_id": request_id, "from": decision.backend, "to": failover.name},
             )
             try:
-                is_cloud = failover_backend == "cloud"
-                fo_url = config.cloud_url if is_cloud else config.local_url
-                fo_model = config.cloud_model if is_cloud else config.local_model
-                fo_key = (config.cloud_api_key or None) if is_cloud else None
-
-                response = await proxy_to_backend(
-                    client, fo_url, fo_model, payload, fo_key, stream=stream
-                )
+                response = await failover.send(client, payload, stream=stream)
                 if stream:
                     return StreamingResponse(
                         response.aiter_bytes(),
                         media_type="text/event-stream",
                         headers={
                             "X-Request-ID": request_id,
-                            "X-Burst-Backend": failover_backend,
+                            "X-Burst-Backend": failover.name,
                             "X-Burst-Reason": "failover",
                         },
                     )
