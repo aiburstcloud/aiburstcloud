@@ -24,17 +24,23 @@ jobs:
       - name: Install package
         run: pip install ".[dev]"
 
+      - name: Lint
+        run: ruff check app/ tests/
+
+      - name: Format check
+        run: ruff format --check app/ tests/
+
+      - name: Type check
+        run: mypy app/
+
       - name: Verify CLI entry point
         run: aiburstcloud --version
 
       - name: Verify import
         run: python -c "from app.router import app; print('FastAPI app loaded')"
 
-      - name: Check syntax (all Python files)
-        run: python -m py_compile app/router.py && python -m py_compile app/cli.py && python -m py_compile app/__main__.py
-
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -v --cov=app --cov-report=term-missing --cov-fail-under=50
 
   audit:
     runs-on: ubuntu-latest
