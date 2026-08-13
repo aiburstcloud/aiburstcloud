@@ -30,8 +30,13 @@ services:
       - DAILY_CLOUD_BUDGET_USD=${DAILY_CLOUD_BUDGET_USD:-5.00}
       - CLOUD_COST_PER_1K_TOKENS=${CLOUD_COST_PER_1K_TOKENS:-0.002}
 
+      # Persistent budget state (survives container restarts via volume)
+      - STATE_DB_PATH=/data/aiburstcloud.db
+
       # Custom sensitivity keywords (comma-separated, optional)
       # - SENSITIVE_KEYWORDS=ais,mmsi,pii,hipaa,secret
+    volumes:
+      - aiburstcloud-state:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -44,3 +49,6 @@ services:
 networks:
   aiburstcloud:
     driver: bridge
+
+volumes:
+  aiburstcloud-state:

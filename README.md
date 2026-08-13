@@ -188,6 +188,7 @@ Every response includes routing metadata:
 | `CLOUD_LATENCY_THRESHOLD_MS` | `5000` | Avg latency trigger (cloud_burst mode) |
 | `DAILY_CLOUD_BUDGET_USD` | `5.00` | Max daily cloud spend before cutoff |
 | `CLOUD_COST_PER_1K_TOKENS` | `0.002` | Estimated cost per 1K tokens |
+| `STATE_DB_PATH` | `aiburstcloud.db` | SQLite file for persistent budget state, shared across workers; `:memory:` disables persistence |
 | `SENSITIVE_KEYWORDS` | *(see code)* | Comma-separated keywords forcing local routing |
 
 ## Compatible backends
