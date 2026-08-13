@@ -4,6 +4,15 @@ All notable changes to AI Burst Cloud will be documented in this file.
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Persistent shared budget state (`app/state.py`): daily cloud spend and token counters now live in a SQLite store (`STATE_DB_PATH`, default `aiburstcloud.db`), so the budget survives restarts and is enforced across multiple uvicorn workers or router replicas sharing the file. Set `STATE_DB_PATH=:memory:` for the old ephemeral per-process behavior. Inspired by the shared-context design in DeLM (arXiv:2606.10662).
+- Docker Compose named volume (`aiburstcloud-state`) so the budget survives container restarts
+
+### Fixed
+- Restarting the router no longer resets the daily cloud budget to zero, and `--workers N` no longer creates N independent budgets
+
 ## [0.1.1] - 2026-07-13
 
 ### Added

@@ -32,6 +32,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.state import CostStore
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -80,6 +82,12 @@ class RouterConfig(BaseModel):
     # Cost controls
     daily_cloud_budget_usd: float = float(os.getenv("DAILY_CLOUD_BUDGET_USD", "5.00"))
     cloud_cost_per_1k_tokens: float = float(os.getenv("CLOUD_COST_PER_1K_TOKENS", "0.002"))
+
+    # Persistent state (budget survives restarts; shared across workers).
+    # Set to ":memory:" for an ephemeral per-process budget.
+    state_db_path: str = Field(
+        default_factory=lambda: os.getenv("STATE_DB_PATH", "aiburstcloud.db")
+    )
 
     # Sensitivity keywords — force routing to local in both modes
     sensitive_keywords: list[str] = Field(
@@ -130,31 +138,37 @@ class BackendMetrics:
 
 
 class CostTracker:
-    def __init__(self, daily_budget: float):
-        self.daily_budget = daily_budget
-        self.today_spend: float = 0.0
-        self.today_date: str = ""
-        self.total_tokens_cloud: int = 0
-        self.total_tokens_local: int = 0
+    """Budget accounting backed by a persistent, shared CostStore.
 
-    def check_and_reset(self) -> None:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if today != self.today_date:
-            self.today_spend = 0.0
-            self.today_date = today
+    The store survives restarts and is shared by all processes pointed at
+    the same STATE_DB_PATH, so the daily cloud budget is enforced globally
+    rather than per-process (a restart no longer resets today's spend).
+    """
+
+    def __init__(self, daily_budget: float, store: CostStore | None = None):
+        self.daily_budget = daily_budget
+        self.store = store if store is not None else CostStore(":memory:")
 
     def record_cloud_usage(self, tokens: int, cost_per_1k: float) -> None:
-        self.check_and_reset()
-        cost = (tokens / 1000) * cost_per_1k
-        self.today_spend += cost
-        self.total_tokens_cloud += tokens
+        self.store.add_cloud_usage(tokens, (tokens / 1000) * cost_per_1k)
 
     def record_local_usage(self, tokens: int) -> None:
-        self.total_tokens_local += tokens
+        self.store.add_local_usage(tokens)
+
+    @property
+    def today_spend(self) -> float:
+        return self.store.snapshot().today_spend
+
+    @property
+    def total_tokens_cloud(self) -> int:
+        return self.store.snapshot().total_tokens_cloud
+
+    @property
+    def total_tokens_local(self) -> int:
+        return self.store.snapshot().total_tokens_local
 
     @property
     def budget_remaining(self) -> float:
-        self.check_and_reset()
         return max(0.0, self.daily_budget - self.today_spend)
 
     @property
@@ -358,7 +372,10 @@ async def health_check_loop(
 config = RouterConfig()
 local_metrics = BackendMetrics("local")
 cloud_metrics = BackendMetrics("cloud")
-cost_tracker = CostTracker(daily_budget=config.daily_cloud_budget_usd)
+cost_tracker = CostTracker(
+    daily_budget=config.daily_cloud_budget_usd,
+    store=CostStore(config.state_db_path),
+)
 
 
 class JSONFormatter(logging.Formatter):

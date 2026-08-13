@@ -5,6 +5,8 @@ dual-mode route decisions) and the observability endpoints. No network
 access or live backends required.
 """
 
+import sqlite3
+
 from fastapi.testclient import TestClient
 
 from app.router import (
@@ -18,6 +20,7 @@ from app.router import (
     classify_sensitivity,
     decide_route,
 )
+from app.state import CostStore
 
 KEYWORDS = ["ssn", "hipaa", "classified", "top secret"]
 
@@ -115,11 +118,14 @@ class TestCostTracker:
         tracker.record_cloud_usage(5000, cost_per_1k=1.0)  # $5 spend on $1 budget
         assert tracker.budget_remaining == 0.0
 
-    def test_spend_resets_on_new_day(self):
-        tracker = CostTracker(daily_budget=1.0)
+    def test_spend_resets_on_new_day(self, tmp_path):
+        db = str(tmp_path / "state.db")
+        tracker = CostTracker(daily_budget=1.0, store=CostStore(db))
         tracker.record_cloud_usage(1000, cost_per_1k=1.0)
         assert tracker.budget_exhausted
-        tracker.today_date = "1999-01-01"  # simulate UTC day rollover
+        # Simulate UTC day rollover by backdating the stored day
+        with sqlite3.connect(db) as conn:
+            conn.execute("UPDATE cost_state SET today_date = '1999-01-01'")
         assert not tracker.budget_exhausted
         assert tracker.today_spend == 0.0
 
