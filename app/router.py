@@ -89,9 +89,7 @@ class CostTracker:
         snap = self.store.snapshot()
         return {
             "today_spend_usd": round(snap.today_spend, 4),
-            "budget_remaining_usd": round(
-                self.daily_budget - snap.today_spend, 4
-            ),
+            "budget_remaining_usd": round(self.daily_budget - snap.today_spend, 4),
             "total_tokens_local": snap.total_tokens_local,
             "total_tokens_cloud": snap.total_tokens_cloud,
         }
