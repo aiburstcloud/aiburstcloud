@@ -177,6 +177,7 @@ Every response includes routing metadata:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BURST_MODE` | `edge_burst` | `edge_burst` or `cloud_burst` |
+| `LOCAL_PROVIDER` | `ollama` | Local backend type: `ollama` or `vllm` |
 | `LOCAL_URL` | `http://localhost:11434` | Ollama / local vLLM endpoint |
 | `LOCAL_MODEL` | `qwen3.5-35b-a3b` | Model name for local backend |
 | `LOCAL_MAX_QUEUE` | `5` | Max concurrent local requests before burst |
@@ -189,13 +190,22 @@ Every response includes routing metadata:
 | `DAILY_CLOUD_BUDGET_USD` | `5.00` | Max daily cloud spend before cutoff |
 | `CLOUD_COST_PER_1K_TOKENS` | `0.002` | Estimated cost per 1K tokens |
 | `STATE_DB_PATH` | `aiburstcloud.db` | SQLite file for persistent budget state, shared across workers; `:memory:` disables persistence |
+| `CLOUD_PROVIDER` | `generic` | Cloud backend type: `generic`, `groq`, `together`, `openrouter`, or `cerebras` |
+| `GROQ_API_KEY` | — | Groq API key (required when `CLOUD_PROVIDER=groq`) |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Model to use on Groq |
+| `TOGETHER_API_KEY` | — | Together AI API key (required when `CLOUD_PROVIDER=together`) |
+| `TOGETHER_MODEL` | `meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo` | Model to use on Together |
+| `OPENROUTER_API_KEY` | — | OpenRouter API key (required when `CLOUD_PROVIDER=openrouter`) |
+| `OPENROUTER_MODEL` | `anthropic/claude-3.5-sonnet` | Model to use on OpenRouter |
+| `CEREBRAS_API_KEY` | — | Cerebras API key (required when `CLOUD_PROVIDER=cerebras`) |
+| `CEREBRAS_MODEL` | `llama3.1-70b` | Model to use on Cerebras |
 | `SENSITIVE_KEYWORDS` | *(see code)* | Comma-separated keywords forcing local routing |
 
 ## Compatible backends
 
 **Local:** Ollama, vLLM, llama.cpp (OpenAI-compatible mode), LM Studio, LocalAI
 
-**Cloud:** RunPod Serverless, Modal, Google Cloud Run GPU, any OpenAI-compatible vLLM endpoint
+**Cloud:** RunPod Serverless, Modal, Google Cloud Run GPU, Groq, Together AI, OpenRouter, Cerebras, any OpenAI-compatible vLLM endpoint
 
 ## OpenClaw / NemoClaw Skill
 

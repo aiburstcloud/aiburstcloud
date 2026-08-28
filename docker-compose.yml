@@ -13,7 +13,8 @@ services:
       # Burst mode: "edge_burst" or "cloud_burst"
       - BURST_MODE=${BURST_MODE:-edge_burst}
 
-      # Local backend
+      # Local backend: "ollama" or "vllm"
+      - LOCAL_PROVIDER=${LOCAL_PROVIDER:-ollama}
       - LOCAL_URL=${LOCAL_URL:-http://host.docker.internal:11434}
       - LOCAL_MODEL=${LOCAL_MODEL:-qwen3.5-35b-a3b}
       - LOCAL_MAX_QUEUE=5
@@ -25,6 +26,12 @@ services:
       - CLOUD_API_KEY=${CLOUD_API_KEY:-}
       - CLOUD_MAX_QUEUE=50
       - CLOUD_LATENCY_THRESHOLD_MS=5000
+
+      # Cloud provider selection: "generic" or "groq"
+      - CLOUD_PROVIDER=${CLOUD_PROVIDER:-generic}
+      # Groq (only when CLOUD_PROVIDER=groq)
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
 
       # Cost controls
       - DAILY_CLOUD_BUDGET_USD=${DAILY_CLOUD_BUDGET_USD:-5.00}
