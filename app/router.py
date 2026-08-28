@@ -40,39 +40,61 @@ from app.models import (
     RouterConfig,
     SensitivityLevel,
 )
+from app.state import CostStore
 
 
 class CostTracker:
-    def __init__(self, daily_budget: float):
-        self.daily_budget = daily_budget
-        self.today_spend: float = 0.0
-        self.today_date: str = ""
-        self.total_tokens_cloud: int = 0
-        self.total_tokens_local: int = 0
+    """Budget accounting backed by a persistent, shared CostStore.
 
-    def check_and_reset(self) -> None:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if today != self.today_date:
-            self.today_spend = 0.0
-            self.today_date = today
+    The store survives restarts and is shared by all processes pointed at
+    the same STATE_DB_PATH, so the daily cloud budget is enforced globally
+    rather than per-process (a restart no longer resets today's spend).
+    """
+
+    def __init__(self, daily_budget: float, store: CostStore | None = None):
+        self.daily_budget = daily_budget
+        self.store = store if store is not None else CostStore(":memory:")
 
     def record_cloud_usage(self, tokens: int, cost_per_1k: float) -> None:
-        self.check_and_reset()
-        cost = (tokens / 1000) * cost_per_1k
-        self.today_spend += cost
-        self.total_tokens_cloud += tokens
+        self.store.add_cloud_usage(tokens, (tokens / 1000) * cost_per_1k)
 
     def record_local_usage(self, tokens: int) -> None:
-        self.total_tokens_local += tokens
+        self.store.add_local_usage(tokens)
+
+    @property
+    def today_spend(self) -> float:
+        snap = self.store.snapshot()
+        return snap.today_spend
+
+    @property
+    def total_tokens_cloud(self) -> int:
+        snap = self.store.snapshot()
+        return snap.total_tokens_cloud
+
+    @property
+    def total_tokens_local(self) -> int:
+        snap = self.store.snapshot()
+        return snap.total_tokens_local
 
     @property
     def budget_remaining(self) -> float:
-        self.check_and_reset()
-        return max(0.0, self.daily_budget - self.today_spend)
+        snap = self.store.snapshot()
+        return max(0.0, self.daily_budget - snap.today_spend)
 
     @property
     def budget_exhausted(self) -> bool:
         return self.budget_remaining <= 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        snap = self.store.snapshot()
+        return {
+            "today_spend_usd": round(snap.today_spend, 4),
+            "budget_remaining_usd": round(
+                self.daily_budget - snap.today_spend, 4
+            ),
+            "total_tokens_local": snap.total_tokens_local,
+            "total_tokens_cloud": snap.total_tokens_cloud,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +244,8 @@ config = RouterConfig()
 local_backend, cloud_backend = create_backends(config)
 local_metrics = local_backend.metrics
 cloud_metrics = cloud_backend.metrics
-cost_tracker = CostTracker(daily_budget=config.daily_cloud_budget_usd)
+cost_store = CostStore(config.state_db_path)
+cost_tracker = CostTracker(daily_budget=config.daily_cloud_budget_usd, store=cost_store)
 
 
 class JSONFormatter(logging.Formatter):
