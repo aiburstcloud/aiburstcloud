@@ -97,7 +97,12 @@
   /* ── layout ─────────────────────────────────────────────── */
   main { flex: 1; display: flex; gap: 12px; padding: 12px 18px 16px; min-height: 0; }
   .pane { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; }
-  #side { width: 360px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
+  /* overflow-y keeps the budget card reachable in a short window; the body itself
+     never scrolls, so without it the last card is simply cut off. */
+  #side {
+    width: 360px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;
+    overflow-y: auto;
+  }
 
   /* ── backend cards ──────────────────────────────────────── */
   .card { padding: 13px 16px 15px; }
