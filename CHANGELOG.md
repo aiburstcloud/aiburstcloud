@@ -7,6 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This p
 ## [Unreleased]
 
 ### Added
+- Web dashboard at `/dashboard` (`app/static/dashboard.html`): backend health with queue depth and latency shown against their burst thresholds, cloud spend against the daily budget, local/cloud token split, and a log of the last 200 routing decisions including the `X-Burst-Reason` behind each. A single self-contained HTML file with no build step, no CDN, and no new dependencies, so it works air-gapped. Backed by `GET /dashboard/data`, which returns everything `/health` does plus the configured thresholds and recent decisions; `/health` itself is unchanged. The decision log is per-process and in-memory — a live view, not an audit log.
 - Persistent shared budget state (`app/state.py`): daily cloud spend and token counters now live in a SQLite store (`STATE_DB_PATH`, default `aiburstcloud.db`), so the budget survives restarts and is enforced across multiple uvicorn workers or router replicas sharing the file. Set `STATE_DB_PATH=:memory:` for the old ephemeral per-process behavior. Inspired by the shared-context design in DeLM (arXiv:2606.10662).
 - Docker Compose named volume (`aiburstcloud-state`) so the budget survives container restarts
 

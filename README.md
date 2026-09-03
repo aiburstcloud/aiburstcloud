@@ -168,9 +168,33 @@ Every response includes routing metadata:
 
 ## Observability
 
+- `GET /dashboard` — live web dashboard (see below)
 - `GET /health` — backend status, queue depths, cost tracking
 - `GET /metrics` — Prometheus-compatible plaintext metrics
 - `GET /v1/models` — OpenAI-compatible model listing
+
+## Dashboard
+
+Open [http://localhost:8000/dashboard](http://localhost:8000/dashboard) once the router is
+running. No extra process, no build step, no CDN — a single HTML file served by the router
+itself, so it works on an air-gapped host.
+
+It shows, refreshing every 5 seconds:
+
+- **Both backends** — health status, queue depth against `LOCAL_MAX_QUEUE` / `CLOUD_MAX_QUEUE`,
+  and average latency against the burst thresholds, so you can see *how close* a backend is to
+  triggering a burst rather than only whether it is up
+- **Cost** — spend against `DAILY_CLOUD_BUDGET_USD`, remaining budget, and the share of tokens
+  kept local
+- **Routing decisions** — the last 200 decisions with the `X-Burst-Reason` behind each one, so
+  sovereignty holds, budget cutoffs, and failovers are visible as they happen
+
+The decision log is per-process and in-memory: it is a live view, not an audit log. Under
+`--workers N` each worker keeps its own log, while cost and budget stay shared through
+`STATE_DB_PATH`. The JSON logs remain the durable record.
+
+`GET /dashboard/data` backs the page — everything `/health` returns plus the configured
+thresholds and the recent decisions.
 
 ## Environment variables
 
@@ -242,6 +266,8 @@ aiburstcloud/
     cli.py             # CLI entry point (aiburstcloud command)
     __main__.py        # python -m app support
     __init__.py        # Package version
+    static/
+      dashboard.html   # Self-contained web dashboard (served at /dashboard)
   skills/
     aiburstcloud/
       SKILL.md         # OpenClaw skill definition
@@ -249,6 +275,7 @@ aiburstcloud/
         network-policy.yaml  # NemoClaw sandbox network policy
   tests/
     test_router.py     # Routing engine unit tests
+    test_dashboard.py  # Dashboard page and data endpoint tests
   scripts/
     audit.sh           # Repo consistency checker
   install.sh           # One-line curl installer

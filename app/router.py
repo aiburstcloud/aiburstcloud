@@ -21,15 +21,17 @@ import logging
 import os
 import time
 import uuid
+from collections import deque
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.state import CostStore
@@ -377,6 +379,30 @@ cost_tracker = CostTracker(
     store=CostStore(config.state_db_path),
 )
 
+# Newest-first ring buffer of recent routing decisions, for the dashboard.
+# Per-process and in-memory: this is a live view, not an audit log — the JSON
+# logs are the durable record. Prompt content is deliberately never stored here,
+# so an unauthenticated dashboard cannot leak what was actually asked.
+recent_decisions: deque[dict[str, Any]] = deque(maxlen=200)
+
+
+def record_decision(backend: str, reason: str, decision: "RouteDecision") -> None:
+    """Record which backend actually served a request, and why.
+
+    Called again after a runtime failover, so the log reflects what served the
+    request rather than only what the engine first chose.
+    """
+    recent_decisions.appendleft(
+        {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "backend": backend,
+            "burst_mode": decision.burst_mode.value,
+            "reason": reason,
+            "sensitivity": decision.sensitivity.value,
+            "queue_depth": decision.primary_queue_depth,
+        }
+    )
+
 
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -465,6 +491,8 @@ async def chat_completions(request: Request) -> Any:
             "budget_remaining_usd": decision.budget_remaining_usd,
         },
     )
+
+    record_decision(decision.backend, decision.reason, decision)
 
     client: httpx.AsyncClient = request.app.state.client
     start = time.monotonic()
@@ -565,6 +593,11 @@ async def chat_completions(request: Request) -> Any:
                 response = await proxy_to_backend(
                     client, fo_url, fo_model, payload, fo_key, stream=stream
                 )
+                record_decision(
+                    failover_backend,
+                    f"{decision.backend}_unreachable_failover_to_{failover_backend}",
+                    decision,
+                )
                 if stream:
                     return StreamingResponse(
                         response.aiter_bytes(),
@@ -653,3 +686,33 @@ async def metrics() -> Response:
         content="\n".join(lines) + "\n",
         media_type="text/plain; version=0.0.4",
     )
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+DASHBOARD_HTML = Path(__file__).parent / "static" / "dashboard.html"
+
+
+@app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+async def dashboard() -> str:
+    return DASHBOARD_HTML.read_text(encoding="utf-8")
+
+
+@app.get("/dashboard/data")
+async def dashboard_data() -> dict[str, Any]:
+    """Everything /health reports, plus the thresholds and recent decisions the
+    dashboard draws its meters and routing log from."""
+    body = await health()
+    body["local"]["model"] = config.local_model
+    body["cloud"]["model"] = config.cloud_model
+    body["limits"] = {
+        "local_max_queue": config.local_max_queue,
+        "local_latency_threshold_ms": config.local_latency_threshold_ms,
+        "cloud_max_queue": config.cloud_max_queue,
+        "cloud_latency_threshold_ms": config.cloud_latency_threshold_ms,
+        "daily_cloud_budget_usd": config.daily_cloud_budget_usd,
+    }
+    body["decisions"] = list(recent_decisions)
+    return body

@@ -46,6 +46,11 @@ aiburstcloud = "app.cli:main"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+# Without this the dashboard HTML is left out of the wheel and /dashboard 404s
+# on pip/install.sh installs, while a git checkout works fine.
+[tool.setuptools.package-data]
+app = ["static/*.html"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 99
