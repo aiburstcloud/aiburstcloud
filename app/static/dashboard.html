@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Burst Cloud — Router</title>
+<script>
+  /* Theme before first paint: dark by default; the header toggle persists a choice. */
+  document.documentElement.dataset.theme =
+    localStorage.getItem("aiburstcloud_theme") || "dark";
+</script>
+<style>
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19;
+    --ink: #ffffff; --ink-2: #c3c2b7; --ink-3: #898781;
+    --hairline: rgba(255,255,255,0.10); --grid: #2c2c2a;
+    --local: #199e70; --cloud: #3987e5; --sovereign: #a071e0;
+    --good: #0ca30c; --warn: #c98500; --critical: #e66767;
+    --wash: rgba(255,255,255,0.05); --wash-2: rgba(255,255,255,0.09);
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb;
+    --ink: #0b0b0b; --ink-2: #52514e; --ink-3: #898781;
+    --hairline: rgba(11,11,11,0.10); --grid: #e1e0d9;
+    --local: #1baf7a; --cloud: #2a78d6; --sovereign: #8a55d0;
+    --good: #0ca30c; --warn: #eda100; --critical: #d03b3b;
+    --wash: rgba(11,11,11,0.04); --wash-2: rgba(11,11,11,0.07);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page); color: var(--ink);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--cloud); outline-offset: 1px; border-radius: 6px; }
+
+  /* ── header ─────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; gap: 10px; padding: 0 18px; height: 52px;
+    border-bottom: 1px solid var(--hairline); background: var(--surface); flex-shrink: 0;
+  }
+  .mark {
+    width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0;
+    background: conic-gradient(from 40deg, var(--local), var(--cloud), var(--sovereign), var(--local));
+    mask: radial-gradient(circle at center, transparent 34%, black 36%);
+    -webkit-mask: radial-gradient(circle at center, transparent 34%, black 36%);
+  }
+  header h1 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+  header .sub {
+    color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    margin-top: 1px;
+  }
+  header .spacer { flex: 1; }
+  #mode {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 620;
+    border: 1px solid var(--hairline); border-radius: 999px; padding: 3px 12px;
+    background: var(--page); color: var(--ink-2);
+  }
+  #mode .flow { font-variant-numeric: tabular-nums; color: var(--ink-3); font-weight: 500; }
+  #mode.edge_burst { border-color: var(--local); }
+  #mode.cloud_burst { border-color: var(--cloud); }
+  #live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); }
+  #live .dot { background: var(--critical); }
+  #live.ok .dot { background: var(--good); box-shadow: 0 0 0 3px rgba(12,163,12,0.15); }
+  .ghost {
+    border: 1px solid var(--hairline); background: none; border-radius: 7px;
+    font-size: 12.5px; padding: 5px 12px; color: var(--ink-2);
+  }
+  .ghost:hover { background: var(--wash); color: var(--ink); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .dot.local { background: var(--local); } .dot.cloud { background: var(--cloud); }
+
+  #banner {
+    display: none; margin: 10px 18px 0; padding: 8px 12px; font-size: 13px;
+    border: 1px solid var(--critical); border-radius: 8px; color: var(--critical);
+    background: var(--surface); flex-shrink: 0;
+  }
+
+  /* ── stat tiles ─────────────────────────────────────────── */
+  #tiles { display: flex; gap: 10px; padding: 14px 18px 0; flex-shrink: 0; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 12px 16px 11px; min-width: 150px; flex: 1;
+  }
+  .tile .v { font-size: 24px; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .tile .l {
+    font-size: 11px; color: var(--ink-2); margin-top: 3px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  #t-budget.bad { border-color: var(--critical); }
+  #t-budget.bad .v { color: var(--critical); }
+
+  /* ── layout ─────────────────────────────────────────────── */
+  main { flex: 1; display: flex; gap: 12px; padding: 12px 18px 16px; min-height: 0; }
+  .pane { background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px; }
+  /* overflow-y keeps the budget card reachable in a short window; the body itself
+     never scrolls, so without it the last card is simply cut off. */
+  #side {
+    width: 360px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px;
+    overflow-y: auto;
+  }
+
+  /* ── backend cards ──────────────────────────────────────── */
+  .card { padding: 13px 16px 15px; }
+  .card .head { display: flex; align-items: center; gap: 8px; }
+  .card .name {
+    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  }
+  .card .model { color: var(--ink-3); font-size: 11.5px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .pill {
+    margin-left: auto; font-size: 10.5px; font-weight: 620; border-radius: 999px;
+    padding: 1px 9px; border: 1px solid var(--hairline); color: var(--ink-2);
+    text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0;
+  }
+  .pill.healthy { color: var(--good); border-color: var(--good); }
+  .pill.degraded { color: var(--warn); border-color: var(--warn); }
+  .pill.down { color: var(--critical); border-color: var(--critical); }
+
+  .meter { margin-top: 11px; }
+  .meter .top {
+    display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--ink-2);
+  }
+  .meter .top b {
+    margin-left: auto; color: var(--ink); font-weight: 650;
+    font-variant-numeric: tabular-nums;
+  }
+  .meter .track {
+    height: 5px; margin-top: 5px; border-radius: 999px; background: var(--wash-2);
+    overflow: hidden;
+  }
+  .meter .fill { height: 100%; border-radius: 999px; background: var(--ink-3); transition: width .3s; }
+  .meter.local .fill { background: var(--local); }
+  .meter.cloud .fill { background: var(--cloud); }
+  .meter.over .fill { background: var(--critical); }
+  .meter.over .top b { color: var(--critical); }
+
+  .stats {
+    display: flex; gap: 16px; margin-top: 12px; padding-top: 11px;
+    border-top: 1px solid var(--grid);
+  }
+  .stats div { font-size: 11px; color: var(--ink-3); text-transform: uppercase;
+    letter-spacing: 0.05em; }
+  .stats b { display: block; font-size: 14px; color: var(--ink); font-weight: 650;
+    letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+
+  /* ── decision log ───────────────────────────────────────── */
+  #log { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .panehead {
+    padding: 11px 16px; border-bottom: 1px solid var(--grid);
+    display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  }
+  .panehead .t { font-weight: 680; font-size: 14px; }
+  .panehead .n { color: var(--ink-3); font-size: 11.5px; margin-left: auto; }
+  #rows { flex: 1; overflow-y: auto; }
+  .row {
+    display: flex; align-items: center; gap: 10px; padding: 9px 16px;
+    border-bottom: 1px solid var(--grid); font-size: 12.5px;
+  }
+  .row:hover { background: var(--wash); }
+  .row .time {
+    color: var(--ink-3); font: 11.5px ui-monospace, monospace; flex-shrink: 0; width: 62px;
+  }
+  .row .to { font-weight: 650; width: 46px; flex-shrink: 0; }
+  .row.local .to { color: var(--local); } .row.cloud .to { color: var(--cloud); }
+  .row .why { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; flex: 1; }
+  .row .why.sovereign { color: var(--sovereign); font-weight: 600; }
+  .row .why.budget { color: var(--warn); font-weight: 600; }
+  .row .why.failover { color: var(--critical); font-weight: 600; }
+  .row .sens {
+    font-size: 10.5px; border-radius: 999px; padding: 1px 9px; flex-shrink: 0;
+    border: 1px solid var(--hairline); color: var(--ink-3);
+  }
+  .row .sens.sensitive { color: var(--sovereign); border-color: var(--sovereign); }
+  .row .sens.internal { color: var(--ink-2); }
+  .row .q { color: var(--ink-3); font-size: 11px; width: 54px; text-align: right;
+    flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--ink-3); font-size: 12.5px; padding: 22px 16px; text-align: center; }
+  .empty code { font: 12px ui-monospace, monospace; color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="mark"></div>
+  <div>
+    <h1>AI Burst Cloud</h1>
+    <div class="sub">Burst router</div>
+  </div>
+  <span id="mode"><span id="modename">—</span><span class="flow" id="modeflow"></span></span>
+  <div class="spacer"></div>
+  <div id="live"><span class="dot"></span><span id="livetext">connecting…</span></div>
+  <button class="ghost" id="theme" aria-label="Toggle color theme">Theme</button>
+</header>
+
+<div id="banner" role="alert"></div>
+
+<div id="tiles">
+  <div class="tile"><div class="v" id="t-spend">—</div><div class="l">Cloud spend today</div></div>
+  <div class="tile" id="t-budget"><div class="v" id="t-remaining">—</div><div class="l">Budget remaining</div></div>
+  <div class="tile"><div class="v" id="t-share">—</div><div class="l">Tokens kept local</div></div>
+  <div class="tile"><div class="v" id="t-total">—</div><div class="l">Requests routed</div></div>
+</div>
+
+<main>
+  <div id="side">
+    <section class="pane card" id="c-local">
+      <div class="head">
+        <span class="dot local"></span>
+        <span class="name">Local</span>
+        <span class="model" id="local-model"></span>
+        <span class="pill" id="local-status">—</span>
+      </div>
+      <div class="meter local" id="local-queue">
+        <div class="top">Queue depth<b>—</b></div>
+        <div class="track"><div class="fill" style="width:0"></div></div>
+      </div>
+      <div class="meter local" id="local-lat">
+        <div class="top">Avg latency<b>—</b></div>
+        <div class="track"><div class="fill" style="width:0"></div></div>
+      </div>
+      <div class="stats">
+        <div>Requests<b id="local-req">—</b></div>
+        <div>Tokens<b id="local-tok">—</b></div>
+      </div>
+    </section>
+
+    <section class="pane card" id="c-cloud">
+      <div class="head">
+        <span class="dot cloud"></span>
+        <span class="name">Cloud</span>
+        <span class="model" id="cloud-model"></span>
+        <span class="pill" id="cloud-status">—</span>
+      </div>
+      <div class="meter cloud" id="cloud-queue">
+        <div class="top">Queue depth<b>—</b></div>
+        <div class="track"><div class="fill" style="width:0"></div></div>
+      </div>
+      <div class="meter cloud" id="cloud-lat">
+        <div class="top">Avg latency<b>—</b></div>
+        <div class="track"><div class="fill" style="width:0"></div></div>
+      </div>
+      <div class="stats">
+        <div>Requests<b id="cloud-req">—</b></div>
+        <div>Tokens<b id="cloud-tok">—</b></div>
+      </div>
+    </section>
+
+    <section class="pane card">
+      <div class="head"><span class="name">Daily cloud budget</span></div>
+      <div class="meter cloud" id="budget">
+        <div class="top">Spent<b>—</b></div>
+        <div class="track"><div class="fill" style="width:0"></div></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="pane" id="log">
+    <div class="panehead">
+      <span class="t">Routing decisions</span>
+      <span class="n" id="logcount"></span>
+    </div>
+    <div id="rows">
+      <div class="empty">Waiting for the first request…</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const num = (n) => Number(n || 0).toLocaleString();
+const usd = (n) => "$" + Number(n || 0).toFixed(4);
+
+const FLOW = {
+  edge_burst: "local → cloud on burst",
+  cloud_burst: "cloud → local when sensitive",
+};
+
+function banner(msg) {
+  const el = $("banner");
+  if (!msg) { el.style.display = "none"; return; }
+  el.textContent = msg;
+  el.style.display = "block";
+}
+
+/* Reason strings come straight from the router's X-Burst-Reason values. */
+function reasonClass(reason) {
+  if (reason.startsWith("sensitive_data")) return "sovereign";
+  if (reason.includes("budget")) return "budget";
+  if (reason.includes("failover") || reason.includes("down") ||
+      reason.includes("overloaded")) return "failover";
+  return "";
+}
+
+/* The router timestamps in UTC; show it in the viewer's own timezone. */
+function clock(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleTimeString([], { hour12: false });
+}
+
+function meter(id, label, text, value, limit) {
+  const el = $(id);
+  const pct = limit > 0 ? Math.min(100, (value / limit) * 100) : 0;
+  el.classList.toggle("over", limit > 0 && value >= limit);
+  el.querySelector(".top").innerHTML = `${esc(label)}<b>${esc(text)}</b>`;
+  el.querySelector(".fill").style.width = pct + "%";
+}
+
+function renderBackend(key, b, maxQueue, latLimit) {
+  $(key + "-status").textContent = b.status;
+  $(key + "-status").className = "pill " + b.status;
+  $(key + "-req").textContent = num(b.total_requests);
+  $(key + "-tok").textContent = num(b.total_tokens);
+  meter(key + "-queue", "Queue depth",
+    `${b.active_requests} / ${maxQueue}`, b.active_requests, maxQueue);
+  meter(key + "-lat", "Avg latency",
+    `${num(Math.round(b.avg_latency_ms))} / ${num(latLimit)} ms`, b.avg_latency_ms, latLimit);
+}
+
+function renderDecisions(rows) {
+  $("logcount").textContent = rows.length ? `last ${rows.length}` : "";
+  $("rows").innerHTML = rows.length
+    ? rows.map((d) => `
+      <div class="row ${esc(d.backend)}">
+        <span class="time">${esc(clock(d.at))}</span>
+        <span class="to">${esc(d.backend)}</span>
+        <span class="why ${reasonClass(d.reason)}">${esc(d.reason.replace(/_/g, " "))}</span>
+        <span class="sens ${esc(d.sensitivity)}">${esc(d.sensitivity)}</span>
+        <span class="q">q${d.queue_depth}</span>
+      </div>`).join("")
+    : '<div class="empty">No requests routed yet — POST to <code>/v1/chat/completions</code>.</div>';
+}
+
+async function refresh() {
+  let data;
+  try {
+    const res = await fetch("/dashboard/data", { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    data = await res.json();
+  } catch (err) {
+    $("live").classList.remove("ok");
+    $("livetext").textContent = "offline";
+    banner("Cannot reach the router: " + err.message);
+    return;
+  }
+  banner(null);
+  $("live").classList.add("ok");
+  $("livetext").textContent = "live";
+
+  $("mode").className = esc(data.burst_mode);
+  $("modename").textContent = data.burst_mode;
+  $("modeflow").textContent = FLOW[data.burst_mode] || "";
+
+  const lim = data.limits;
+  $("local-model").textContent = data.local.model || "";
+  $("cloud-model").textContent = data.cloud.model || "";
+  renderBackend("local", data.local, lim.local_max_queue, lim.local_latency_threshold_ms);
+  renderBackend("cloud", data.cloud, lim.cloud_max_queue, lim.cloud_latency_threshold_ms);
+
+  const c = data.cost;
+  $("t-spend").textContent = usd(c.today_spend_usd);
+  $("t-remaining").textContent = usd(c.budget_remaining_usd);
+  $("t-budget").classList.toggle("bad", c.budget_remaining_usd <= 0);
+  const tokens = c.total_tokens_local + c.total_tokens_cloud;
+  $("t-share").textContent = tokens ? Math.round((c.total_tokens_local / tokens) * 100) + "%" : "—";
+  $("t-total").textContent = num(data.local.total_requests + data.cloud.total_requests);
+  meter("budget", "Spent",
+    `${usd(c.today_spend_usd)} / ${usd(lim.daily_cloud_budget_usd)}`,
+    c.today_spend_usd, lim.daily_cloud_budget_usd);
+
+  renderDecisions(data.decisions);
+}
+
+$("theme").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("aiburstcloud_theme", next);
+});
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
+
+
